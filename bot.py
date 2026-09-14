@@ -22,7 +22,7 @@ if not API_KEY:
 
 # === Настройки API (Gemini через OpenAI-совместимый эндпоинт) ===
 AI_URL = "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions"
-AI_MODEL = "gemini-2.0-flash"  # можно "gemini-1.5-flash"
+AI_MODEL = "gemini-1.5-flash"  # можно "gemini-1.5-flash"
 HEADERS = {
     "Authorization": f"Bearer {API_KEY}",
     "Content-Type": "application/json"
