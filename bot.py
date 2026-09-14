@@ -22,7 +22,7 @@ if not API_KEY:
 
 # === Настройки API (Gemini через OpenAI-совместимый эндпоинт) ===
 AI_URL = "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions"
-AI_MODEL = "gemini-1.5-flash"  # можно "gemini-1.5-flash"
+AI_MODEL = "gemini-1.5-flash"  # стабильная бесплатная модель
 HEADERS = {
     "Authorization": f"Bearer {API_KEY}",
     "Content-Type": "application/json"
@@ -108,6 +108,22 @@ def send_long_message(chat_id, text, reply_to_message_id=None):
             bot.send_message(chat_id, part)
         time.sleep(0.5)
 
+# === ТЕСТ GEMINI ===
+@bot.message_handler(commands=['test'])
+def test_gemini(message):
+    chat_id = message.chat.id
+    bot.send_message(chat_id, "🧪 Тестирую Gemini, подожди...")
+    try:
+        payload = {
+            "model": AI_MODEL,
+            "messages": [{"role": "user", "content": "Скажи только слово: работает"}],
+            "max_tokens": 50
+        }
+        r = requests.post(AI_URL, json=payload, headers=HEADERS, timeout=60)
+        bot.send_message(chat_id, f"📡 Статус: {r.status_code}\n\nОтвет:\n{r.text[:1500]}")
+    except Exception as e:
+        bot.send_message(chat_id, f"💥 Ошибка: {type(e).__name__}: {e}")
+
 # === Команды ===
 @bot.message_handler(commands=['start', 'reset'])
 def send_welcome(message):
@@ -127,7 +143,7 @@ def help_command(message):
         "• Отправь фото – я опишу его.\n"
         "• Кнопка '🔄 Сбросить историю' – очищает память.\n"
         "• Кнопка '📊 Статус' – показывает информацию о текущем диалоге.\n"
-        "• Команды: /start, /reset, /help, /stats"
+        "• Команды: /start, /reset, /help, /stats, /test"
     )
     bot.reply_to(message, help_text, reply_markup=get_main_keyboard())
 
@@ -179,7 +195,7 @@ def reply_text(message):
             data = response.json()
 
             if 'choices' not in data or not data['choices']:
-                raise ValueError(f"Нет choices: {data}")
+                raise ValueError(f"Нет choices: {str(data)[:300]}")
 
             reply = data['choices'][0]['message']['content'].strip()
             if not reply:
@@ -189,9 +205,9 @@ def reply_text(message):
             update_history(chat_id, "assistant", reply)
             break
         except Exception as e:
-            print(f"Ошибка (попытка {attempt + 1}): {e}")
+            print(f"Ошибка (попытка {attempt + 1}): {e}", flush=True)
             if attempt == 2:
-                bot.reply_to(message, "❌ Не удалось получить ответ. Попробуйте позже.", reply_markup=get_main_keyboard())
+                bot.reply_to(message, "❌ Не удалось получить ответ. Напиши /test чтобы увидеть причину.", reply_markup=get_main_keyboard())
             else:
                 time.sleep(2)
 
@@ -216,14 +232,11 @@ def reply_photo(message):
 
             payload = {
                 "model": AI_MODEL,
-                "messages": get_history(chat_id) + [
-                    {
-                        "role": "user",
-                        "content": [
-                            {"type": "text", "text": user_text},
-                            {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{base64_image}"}}
-                        ]
-                    }
+                "messages": [
+                    {"role": "user", "content": [
+                        {"type": "text", "text": user_text},
+                        {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{base64_image}"}}
+                    ]}
                 ],
                 "max_tokens": MAX_TOKENS,
                 "temperature": 0.7
@@ -232,21 +245,20 @@ def reply_photo(message):
             data = response.json()
 
             if 'choices' not in data or not data['choices']:
-                raise ValueError(f"Нет choices: {data}")
+                raise ValueError(f"Нет choices: {str(data)[:300]}")
 
             reply = data['choices'][0]['message']['content'].strip()
             send_long_message(chat_id, reply, message.message_id)
             update_history(chat_id, "assistant", reply)
             break
         except Exception as e:
-            print(f"Ошибка при фото (попытка {attempt + 1}): {e}")
+            print(f"Ошибка при фото (попытка {attempt + 1}): {e}", flush=True)
             if attempt == 2:
                 bot.reply_to(message, "❌ Не удалось обработать фото.", reply_markup=get_main_keyboard())
             else:
                 time.sleep(2)
 
-# === Веб-сервер (для Render free tier) ===
-# Render Free — это Web Service, он требует, чтобы приложение слушало порт.
+# === Веб-сервер для Render ===
 if os.environ.get("PORT"):
     from flask import Flask
     app = Flask(__name__)
@@ -260,5 +272,5 @@ if os.environ.get("PORT"):
 
     threading.Thread(target=run_web, daemon=True).start()
 
-print("✅ Бот запущен!")
+print("✅ Бот запущен!", flush=True)
 bot.infinity_polling()
