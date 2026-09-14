@@ -13,6 +13,7 @@ from telebot.types import (
     InlineKeyboardButton,
 )
 from dotenv import load_dotenv
+from pydub import AudioSegment
 
 # === Загрузка переменных окружения ===
 load_dotenv()
@@ -25,8 +26,9 @@ if not TOKEN:
 if not API_KEY:
     raise ValueError("Не задан AI_API_KEY в переменных окружения")
 
-# === Настройки API (Gemini через OpenAI-совместимый эндпоинт) ===
+# === Настройки API ===
 AI_URL = "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions"
+IMAGEN_URL = "https://generativelanguage.googleapis.com/v1beta/models/imagen-4.0-generate-001:predict"
 HEADERS = {
     "Authorization": f"Bearer {API_KEY}",
     "Content-Type": "application/json"
@@ -44,7 +46,7 @@ DEFAULT_MAX_TOKENS = 4096
 MAX_SAVED_ANSWER_LEN = 800
 TIMEOUT = 600
 
-# === Словари для хранения настроек пользователей ===
+# === Память пользователей ===
 user_models = {}
 user_thinking = {}
 user_history_len = {}
@@ -56,19 +58,19 @@ chat_history = {}
 MODEL_INFO = {
     "gemini-3.8-flash": {
         "name": "🌟 Gemini 3.8 Flash",
-        "desc": "Самая умная Flash-модель. Отлично подходит для сложных задач, рассуждений и анализа изображений.",
+        "desc": "Самая умная Flash-модель. Сложные задачи, рассуждения, анализ изображений.",
     },
     "gemini-3.7-flash": {
         "name": "⚡ Gemini 3.7 Flash",
-        "desc": "Быстрая и мощная. Хороша для кодинга, работы с видео и агентных задач.",
+        "desc": "Быстрая и мощная. Кодинг, работа с видео, агентные задачи.",
     },
     "gemini-3.6-flash": {
         "name": "🚀 Gemini 3.6 Flash",
-        "desc": "Надёжная рабочая лошадка. Баланс скорости, качества и эффективности.",
+        "desc": "Надёжная рабочая лошадка. Баланс скорости и качества.",
     },
     "gemini-3.5-flash-lite": {
         "name": "🍃 Gemini 3.5 Flash-Lite",
-        "desc": "Самая быстрая и лёгкая. Идеальна для простых вопросов, перевода и больших объёмов.",
+        "desc": "Самая быстрая. Простые вопросы, перевод, большие объёмы.",
     },
 }
 
@@ -78,7 +80,6 @@ THINKING_LEVELS = {
     "high": "🔬 Глубокий (high)",
 }
 
-# Варианты для настроек контекста
 HISTORY_OPTIONS = [3, 6, 10, 20, 50]
 TEMPERATURE_OPTIONS = [0.0, 0.3, 0.7, 1.0, 1.5]
 MAX_TOKENS_OPTIONS = [512, 1024, 2048, 4096, 8192]
@@ -94,7 +95,7 @@ def get_main_keyboard():
     markup.add(btn_models, btn_settings, btn_reset, btn_help)
     return markup
 
-# === Работа с историей ===
+# === История ===
 def get_history(chat_id):
     if chat_id not in chat_history:
         chat_history[chat_id] = []
@@ -128,7 +129,7 @@ def update_history(chat_id, role, content):
 def clear_history(chat_id):
     chat_history[chat_id] = [{"role": "system", "content": "Ты — полезный ИИ-ассистент. Отвечай кратко и по делу."}]
 
-# === Отправка длинных сообщений ===
+# === Длинные сообщения ===
 def send_long_message(chat_id, text, reply_to_message_id=None):
     if not text:
         return
@@ -174,8 +175,7 @@ def show_models(message):
     chat_id = message.chat.id
     bot.send_message(
         chat_id,
-        "🧠 *Выбери модель:*\n\n"
-        "Нажми на модель, чтобы увидеть её описание и выбрать.",
+        "🧠 *Выбери модель:*\n\nНажми на модель, чтобы увидеть её описание.",
         reply_markup=build_models_keyboard(chat_id),
         parse_mode="Markdown"
     )
@@ -191,9 +191,8 @@ def callback_model_info(call):
         return
 
     markup = InlineKeyboardMarkup(row_width=1)
-    confirm_btn = InlineKeyboardButton("✅ Выбрать эту модель", callback_data=f"confirm_model:{model_id}")
-    back_btn = InlineKeyboardButton("⬅️ Назад к списку", callback_data="back_to_models")
-    markup.add(confirm_btn, back_btn)
+    markup.add(InlineKeyboardButton("✅ Выбрать эту модель", callback_data=f"confirm_model:{model_id}"))
+    markup.add(InlineKeyboardButton("⬅️ Назад к списку", callback_data="back_to_models"))
 
     bot.edit_message_text(
         chat_id=chat_id,
@@ -214,24 +213,19 @@ def callback_confirm_model(call):
     current_thinking = user_thinking.get(chat_id, DEFAULT_THINKING)
     for level_id, level_name in THINKING_LEVELS.items():
         check = " ✅" if level_id == current_thinking else ""
-        button = InlineKeyboardButton(
+        markup.add(InlineKeyboardButton(
             text=f"{level_name}{check}",
             callback_data=f"thinking:{level_id}"
-        )
-        markup.add(button)
+        ))
 
     bot.edit_message_text(
         chat_id=chat_id,
         message_id=call.message.message_id,
-        text=f"Модель *{MODEL_INFO[model_id]['name']}* выбрана!\n\n"
-             f"Теперь выбери *режим размышлений*:\n\n"
-             f"• ⚡ `low` — быстрые ответы, минимум затрат\n"
-             f"• 🧠 `medium` — баланс скорости и качества\n"
-             f"• 🔬 `high` — глубокий анализ, сложные задачи",
+        text=f"Модель *{MODEL_INFO[model_id]['name']}* выбрана!\n\nТеперь выбери *режим размышлений*:",
         reply_markup=markup,
         parse_mode="Markdown"
     )
-    bot.answer_callback_query(call.id, f"Модель выбрана!")
+    bot.answer_callback_query(call.id, "Модель выбрана!")
 
 @bot.callback_query_handler(func=lambda call: call.data.startswith('thinking:'))
 def callback_thinking(call):
@@ -240,18 +234,15 @@ def callback_thinking(call):
     user_thinking[chat_id] = level
 
     model_id = user_models.get(chat_id, DEFAULT_MODEL)
-    model_name = MODEL_INFO[model_id]["name"]
-
     bot.edit_message_text(
         chat_id=chat_id,
         message_id=call.message.message_id,
         text=f"✅ *Настройки сохранены!*\n\n"
-             f"🧠 Модель: {model_name}\n"
-             f"⚙️ Режим: {THINKING_LEVELS[level]}\n\n"
-             f"Теперь можешь задавать вопросы!",
+             f"🧠 Модель: {MODEL_INFO[model_id]['name']}\n"
+             f"⚙️ Режим: {THINKING_LEVELS[level]}",
         parse_mode="Markdown"
     )
-    bot.answer_callback_query(call.id, "Настройки сохранены!")
+    bot.answer_callback_query(call.id, "Сохранено!")
 
 @bot.callback_query_handler(func=lambda call: call.data == 'back_to_models')
 def callback_back(call):
@@ -265,29 +256,17 @@ def callback_back(call):
     )
     bot.answer_callback_query(call.id)
 
-# === МЕНЮ НАСТРОЕК КОНТЕКСТА ===
+# === НАСТРОЙКИ ===
 def build_settings_keyboard(chat_id):
     markup = InlineKeyboardMarkup(row_width=1)
     hist = user_history_len.get(chat_id, DEFAULT_HISTORY_LEN)
     temp = user_temperature.get(chat_id, DEFAULT_TEMPERATURE)
     tokens = user_max_tokens.get(chat_id, DEFAULT_MAX_TOKENS)
 
-    markup.add(InlineKeyboardButton(
-        text=f"📏 Длина контекста: {hist} сообщений",
-        callback_data="settings:history"
-    ))
-    markup.add(InlineKeyboardButton(
-        text=f"🎲 Температура: {temp}",
-        callback_data="settings:temperature"
-    ))
-    markup.add(InlineKeyboardButton(
-        text=f"📝 Макс. токенов ответа: {tokens}",
-        callback_data="settings:max_tokens"
-    ))
-    markup.add(InlineKeyboardButton(
-        text="🔄 Сбросить всё к значениям по умолчанию",
-        callback_data="settings:reset"
-    ))
+    markup.add(InlineKeyboardButton(text=f"📏 Длина контекста: {hist} сообщений", callback_data="settings:history"))
+    markup.add(InlineKeyboardButton(text=f"🎲 Температура: {temp}", callback_data="settings:temperature"))
+    markup.add(InlineKeyboardButton(text=f"📝 Макс. токенов: {tokens}", callback_data="settings:max_tokens"))
+    markup.add(InlineKeyboardButton(text="🔄 Сбросить всё по умолчанию", callback_data="settings:reset"))
     return markup
 
 @bot.message_handler(commands=['settings'])
@@ -296,10 +275,9 @@ def show_settings(message):
     bot.send_message(
         chat_id,
         "⚙️ *Настройки контекста*\n\n"
-        "Здесь можно настроить, как нейросеть работает с диалогом:\n\n"
-        "📏 *Длина контекста* — сколько последних сообщений бот помнит.\n"
-        "🎲 *Температура* — насколько креативные ответы (0.0 — строго, 1.5 — творчески).\n"
-        "📝 *Макс. токенов* — максимальная длина одного ответа.",
+        "📏 *Длина контекста* — сколько сообщений бот помнит.\n"
+        "🎲 *Температура* — креативность (0.0 — строго, 1.5 — творчески).\n"
+        "📝 *Макс. токенов* — длина ответа.",
         reply_markup=build_settings_keyboard(chat_id),
         parse_mode="Markdown"
     )
@@ -314,116 +292,63 @@ def callback_settings(call):
         markup = InlineKeyboardMarkup(row_width=1)
         for opt in HISTORY_OPTIONS:
             check = " ✅" if opt == current else ""
-            markup.add(InlineKeyboardButton(
-                text=f"{opt} сообщений{check}",
-                callback_data=f"set_history:{opt}"
-            ))
+            markup.add(InlineKeyboardButton(text=f"{opt} сообщений{check}", callback_data=f"set_history:{opt}"))
         markup.add(InlineKeyboardButton("⬅️ Назад", callback_data="settings:back"))
-        bot.edit_message_text(
-            chat_id=chat_id,
-            message_id=call.message.message_id,
-            text="📏 *Выбери длину контекста:*\n\n"
-                 "Чем больше — тем лучше бот помнит диалог, но тем больше токенов тратит.",
-            reply_markup=markup,
-            parse_mode="Markdown"
-        )
+        bot.edit_message_text(chat_id=chat_id, message_id=call.message.message_id,
+                              text="📏 *Выбери длину контекста:*", reply_markup=markup, parse_mode="Markdown")
 
     elif action == "temperature":
         current = user_temperature.get(chat_id, DEFAULT_TEMPERATURE)
         markup = InlineKeyboardMarkup(row_width=1)
-        labels = {
-            0.0: "0.0 — Строгие, точные ответы",
-            0.3: "0.3 — Умеренно строгие",
-            0.7: "0.7 — Баланс (рекомендуется)",
-            1.0: "1.0 — Креативные",
-            1.5: "1.5 — Максимально творческие",
-        }
+        labels = {0.0: "0.0 — Строго", 0.3: "0.3 — Умеренно", 0.7: "0.7 — Баланс",
+                  1.0: "1.0 — Креативно", 1.5: "1.5 — Максимум"}
         for opt in TEMPERATURE_OPTIONS:
             check = " ✅" if opt == current else ""
-            markup.add(InlineKeyboardButton(
-                text=f"{labels[opt]}{check}",
-                callback_data=f"set_temperature:{opt}"
-            ))
+            markup.add(InlineKeyboardButton(text=f"{labels[opt]}{check}", callback_data=f"set_temperature:{opt}"))
         markup.add(InlineKeyboardButton("⬅️ Назад", callback_data="settings:back"))
-        bot.edit_message_text(
-            chat_id=chat_id,
-            message_id=call.message.message_id,
-            text="🎲 *Выбери температуру:*\n\n"
-                 "Влияет на «креативность» ответов. Чем ниже — тем более предсказуемые и точные ответы.",
-            reply_markup=markup,
-            parse_mode="Markdown"
-        )
+        bot.edit_message_text(chat_id=chat_id, message_id=call.message.message_id,
+                              text="🎲 *Выбери температуру:*", reply_markup=markup, parse_mode="Markdown")
 
     elif action == "max_tokens":
         current = user_max_tokens.get(chat_id, DEFAULT_MAX_TOKENS)
         markup = InlineKeyboardMarkup(row_width=1)
         for opt in MAX_TOKENS_OPTIONS:
             check = " ✅" if opt == current else ""
-            markup.add(InlineKeyboardButton(
-                text=f"{opt} токенов{check}",
-                callback_data=f"set_tokens:{opt}"
-            ))
+            markup.add(InlineKeyboardButton(text=f"{opt} токенов{check}", callback_data=f"set_tokens:{opt}"))
         markup.add(InlineKeyboardButton("⬅️ Назад", callback_data="settings:back"))
-        bot.edit_message_text(
-            chat_id=chat_id,
-            message_id=call.message.message_id,
-            text="📝 *Выбери максимальную длину ответа:*\n\n"
-                 "512 токенов ≈ 1-2 абзаца, 8192 ≈ длинная статья.",
-            reply_markup=markup,
-            parse_mode="Markdown"
-        )
+        bot.edit_message_text(chat_id=chat_id, message_id=call.message.message_id,
+                              text="📝 *Выбери макс. длину ответа:*", reply_markup=markup, parse_mode="Markdown")
 
     elif action == "reset":
         user_history_len[chat_id] = DEFAULT_HISTORY_LEN
         user_temperature[chat_id] = DEFAULT_TEMPERATURE
         user_max_tokens[chat_id] = DEFAULT_MAX_TOKENS
-        bot.edit_message_text(
-            chat_id=chat_id,
-            message_id=call.message.message_id,
-            text="✅ *Настройки сброшены к значениям по умолчанию!*",
-            reply_markup=build_settings_keyboard(chat_id),
-            parse_mode="Markdown"
-        )
+        bot.edit_message_text(chat_id=chat_id, message_id=call.message.message_id,
+                              text="✅ *Настройки сброшены!*", reply_markup=build_settings_keyboard(chat_id), parse_mode="Markdown")
 
     elif action == "back":
-        bot.edit_message_text(
-            chat_id=chat_id,
-            message_id=call.message.message_id,
-            text="⚙️ *Настройки контекста*",
-            reply_markup=build_settings_keyboard(chat_id),
-            parse_mode="Markdown"
-        )
+        bot.edit_message_text(chat_id=chat_id, message_id=call.message.message_id,
+                              text="⚙️ *Настройки контекста*", reply_markup=build_settings_keyboard(chat_id), parse_mode="Markdown")
 
     bot.answer_callback_query(call.id)
 
-# Обработчики выбора значений
 @bot.callback_query_handler(func=lambda call: call.data.startswith('set_history:'))
 def callback_set_history(call):
     chat_id = call.message.chat.id
     val = int(call.data.split(':', 1)[1])
     user_history_len[chat_id] = val
     trim_history(chat_id)
-    bot.edit_message_text(
-        chat_id=chat_id,
-        message_id=call.message.message_id,
-        text="⚙️ *Настройки контекста*",
-        reply_markup=build_settings_keyboard(chat_id),
-        parse_mode="Markdown"
-    )
-    bot.answer_callback_query(call.id, f"Контекст: {val} сообщений")
+    bot.edit_message_text(chat_id=chat_id, message_id=call.message.message_id,
+                          text="⚙️ *Настройки контекста*", reply_markup=build_settings_keyboard(chat_id), parse_mode="Markdown")
+    bot.answer_callback_query(call.id, f"Контекст: {val}")
 
 @bot.callback_query_handler(func=lambda call: call.data.startswith('set_temperature:'))
 def callback_set_temp(call):
     chat_id = call.message.chat.id
     val = float(call.data.split(':', 1)[1])
     user_temperature[chat_id] = val
-    bot.edit_message_text(
-        chat_id=chat_id,
-        message_id=call.message.message_id,
-        text="⚙️ *Настройки контекста*",
-        reply_markup=build_settings_keyboard(chat_id),
-        parse_mode="Markdown"
-    )
+    bot.edit_message_text(chat_id=chat_id, message_id=call.message.message_id,
+                          text="⚙️ *Настройки контекста*", reply_markup=build_settings_keyboard(chat_id), parse_mode="Markdown")
     bot.answer_callback_query(call.id, f"Температура: {val}")
 
 @bot.callback_query_handler(func=lambda call: call.data.startswith('set_tokens:'))
@@ -431,33 +356,24 @@ def callback_set_tokens(call):
     chat_id = call.message.chat.id
     val = int(call.data.split(':', 1)[1])
     user_max_tokens[chat_id] = val
-    bot.edit_message_text(
-        chat_id=chat_id,
-        message_id=call.message.message_id,
-        text="⚙️ *Настройки контекста*",
-        reply_markup=build_settings_keyboard(chat_id),
-        parse_mode="Markdown"
-    )
+    bot.edit_message_text(chat_id=chat_id, message_id=call.message.message_id,
+                          text="⚙️ *Настройки контекста*", reply_markup=build_settings_keyboard(chat_id), parse_mode="Markdown")
     bot.answer_callback_query(call.id, f"Макс. токенов: {val}")
 
 # === ТЕСТ ===
 @bot.message_handler(commands=['test'])
 def test_gemini(message):
     chat_id = message.chat.id
-    bot.send_message(chat_id, "🧪 Тестирую Gemini, подожди...")
+    bot.send_message(chat_id, "🧪 Тестирую Gemini...")
     model = user_models.get(chat_id, DEFAULT_MODEL)
     try:
-        payload = {
-            "model": model,
-            "messages": [{"role": "user", "content": "Скажи только слово: работает"}],
-            "max_tokens": 50
-        }
+        payload = {"model": model, "messages": [{"role": "user", "content": "Скажи: работает"}], "max_tokens": 50}
         r = requests.post(AI_URL, json=payload, headers=HEADERS, timeout=60)
-        bot.send_message(chat_id, f"📡 Модель: {model}\nСтатус: {r.status_code}\n\nОтвет:\n{r.text[:1500]}")
+        bot.send_message(chat_id, f"📡 Модель: {model}\nСтатус: {r.status_code}\n\n{r.text[:1500]}")
     except Exception as e:
         bot.send_message(chat_id, f"💥 Ошибка: {type(e).__name__}: {e}")
 
-# === Команды ===
+# === КОМАНДЫ ===
 @bot.message_handler(commands=['start', 'reset'])
 def send_welcome(message):
     chat_id = message.chat.id
@@ -466,21 +382,23 @@ def send_welcome(message):
     bot.send_message(chat_id,
                      f"Привет! Я бот на нейросети Gemini.\n"
                      f"Сейчас активна модель: {model_name}\n"
-                     f"Умею считать, переводить и видеть картинки! ✨🧠\n"
-                     f"Используй кнопки внизу или /models и /settings.",
+                     f"Умею: текст, фото 🖼, голосовые 🎤 и генерацию картинок 🎨\n"
+                     f"Используй кнопки внизу или /models, /settings, /image",
                      reply_markup=get_main_keyboard())
 
 @bot.message_handler(commands=['help'])
 def help_command(message):
     help_text = (
         "📚 Помощь:\n"
-        "• Отправь мне текст – я отвечу.\n"
-        "• Отправь фото – я опишу его.\n"
-        "• Кнопка '🧠 Модели' – выбрать модель и режим.\n"
-        "• Кнопка '⚙️ Настройки' – настроить контекст, температуру, длину ответа.\n"
-        "• Кнопка '🔄 Сбросить историю' – очищает память.\n"
-        "• Кнопка '📊 Статус' – показывает текущие настройки.\n"
-        "• Команды: /start, /reset, /help, /stats, /models, /settings, /test"
+        "• Отправь текст – отвечу.\n"
+        "• Отправь фото – опишу.\n"
+        "• Отправь голосовое – расшифрую и отвечу.\n"
+        "• /image <описание> – нарисую картинку.\n"
+        "• 🧠 Модели – выбрать модель.\n"
+        "• ⚙️ Настройки – контекст, температура, токены.\n"
+        "• 🔄 Сбросить историю – очистить память.\n"
+        "• 📊 Статус – текущие настройки.\n"
+        "• Команды: /start, /reset, /help, /stats, /models, /settings, /test, /image"
     )
     bot.reply_to(message, help_text, reply_markup=get_main_keyboard())
 
@@ -498,13 +416,12 @@ def stats_command(message):
                  f"📊 *Текущий статус:*\n\n"
                  f"🧠 Модель: {MODEL_INFO[model]['name']}\n"
                  f"⚙️ Режим: {THINKING_LEVELS[thinking]}\n"
-                 f"📏 Контекст: {hist_len} сообщений\n"
+                 f"📏 Контекст: {hist_len}\n"
                  f"🎲 Температура: {temp}\n"
                  f"📝 Макс. токенов: {tokens}\n\n"
                  f"Сообщений в истории: {len(history)}\n"
-                 f"Примерный размер: {total_chars} символов (~{total_chars//4} токенов)",
-                 reply_markup=get_main_keyboard(),
-                 parse_mode="Markdown")
+                 f"Размер: {total_chars} символов (~{total_chars//4} токенов)",
+                 reply_markup=get_main_keyboard(), parse_mode="Markdown")
 
 @bot.message_handler(func=lambda m: m.text == "🧠 Модели")
 def models_button(message):
@@ -517,7 +434,7 @@ def settings_button(message):
 @bot.message_handler(func=lambda m: m.text == "🔄 Сбросить историю")
 def reset_button(message):
     clear_history(message.chat.id)
-    bot.reply_to(message, "✅ История очищена! Можете задавать новый вопрос.", reply_markup=get_main_keyboard())
+    bot.reply_to(message, "✅ История очищена!", reply_markup=get_main_keyboard())
 
 @bot.message_handler(func=lambda m: m.text == "ℹ️ Помощь")
 def help_button(message):
@@ -527,7 +444,39 @@ def help_button(message):
 def status_button(message):
     stats_command(message)
 
-# === Обработка текста ===
+# === ГЕНЕРАЦИЯ КАРТИНОК ===
+@bot.message_handler(commands=['image'])
+def generate_image(message):
+    chat_id = message.chat.id
+    prompt = message.text.replace('/image', '', 1).strip()
+
+    if not prompt:
+        bot.reply_to(message, "🖼 Напиши, что нарисовать: `/image кот в космосе`", parse_mode="Markdown")
+        return
+
+    bot.send_message(chat_id, "🎨 Генерирую картинку, это займёт 10-15 секунд...")
+
+    try:
+        payload = {
+            "instances": [{"prompt": prompt}],
+            "parameters": {"sampleCount": 1}
+        }
+        response = requests.post(IMAGEN_URL, json=payload, headers=HEADERS, timeout=120)
+        data = response.json()
+
+        if 'predictions' not in data or not data['predictions']:
+            raise ValueError(f"Нет predictions: {str(data)[:300]}")
+
+        image_b64 = data['predictions'][0]['bytesBase64Encoded']
+        image_bytes = base64.b64decode(image_b64)
+
+        bot.send_photo(chat_id, image_bytes, reply_to_message_id=message.message_id)
+
+    except Exception as e:
+        print(f"Ошибка генерации: {e}", flush=True)
+        bot.reply_to(message, "❌ Не удалось сгенерировать картинку. Проверь, что биллинг включён в Google Cloud.", reply_markup=get_main_keyboard())
+
+# === ОБРАБОТКА ТЕКСТА ===
 @bot.message_handler(content_types=['text'])
 def reply_text(message):
     user_text = message.text
@@ -566,11 +515,11 @@ def reply_text(message):
         except Exception as e:
             print(f"Ошибка (попытка {attempt + 1}): {e}", flush=True)
             if attempt == 2:
-                bot.reply_to(message, "❌ Не удалось получить ответ. Напиши /test чтобы увидеть причину.", reply_markup=get_main_keyboard())
+                bot.reply_to(message, "❌ Не удалось получить ответ. Напиши /test.", reply_markup=get_main_keyboard())
             else:
                 time.sleep(2)
 
-# === Обработка фото ===
+# === ОБРАБОТКА ФОТО ===
 @bot.message_handler(content_types=['photo'])
 def reply_photo(message):
     chat_id = message.chat.id
@@ -620,6 +569,51 @@ def reply_photo(message):
                 bot.reply_to(message, "❌ Не удалось обработать фото.", reply_markup=get_main_keyboard())
             else:
                 time.sleep(2)
+
+# === ОБРАБОТКА ГОЛОСОВЫХ ===
+@bot.message_handler(content_types=['voice'])
+def reply_voice(message):
+    chat_id = message.chat.id
+    bot.send_chat_action(chat_id, 'typing')
+
+    model = user_models.get(chat_id, DEFAULT_MODEL)
+    temperature = user_temperature.get(chat_id, DEFAULT_TEMPERATURE)
+    max_tokens = user_max_tokens.get(chat_id, DEFAULT_MAX_TOKENS)
+
+    try:
+        file_info = bot.get_file(message.voice.file_id)
+        downloaded_file = bot.download_file(file_info.file_path)
+
+        # Конвертируем OGG в WAV через pydub
+        audio = AudioSegment.from_file(BytesIO(downloaded_file), format="ogg")
+        wav_buffer = BytesIO()
+        audio.export(wav_buffer, format="wav")
+        base64_audio = base64.b64encode(wav_buffer.getvalue()).decode('utf-8')
+
+        payload = {
+            "model": model,
+            "messages": [
+                {"role": "user", "content": [
+                    {"type": "text", "text": "Расшифруй это голосовое сообщение и ответь на него по существу на русском языке."},
+                    {"type": "input_audio", "input_audio": {"data": base64_audio, "format": "wav"}}
+                ]}
+            ],
+            "max_tokens": max_tokens,
+            "temperature": temperature
+        }
+        response = requests.post(AI_URL, json=payload, headers=HEADERS, timeout=TIMEOUT)
+        data = response.json()
+
+        if 'choices' not in data or not data['choices']:
+            raise ValueError(f"Нет choices: {str(data)[:300]}")
+
+        reply = data['choices'][0]['message']['content'].strip()
+        send_long_message(chat_id, reply, message.message_id)
+        update_history(chat_id, "assistant", reply)
+
+    except Exception as e:
+        print(f"Ошибка при голосовом: {e}", flush=True)
+        bot.reply_to(message, "❌ Не удалось обработать голосовое. Проверь, что FFmpeg установлен.", reply_markup=get_main_keyboard())
 
 # === Веб-сервер для Render ===
 if os.environ.get("PORT"):
