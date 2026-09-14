@@ -28,7 +28,6 @@ if not API_KEY:
 
 # === Настройки API ===
 AI_URL = "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions"
-IMAGEN_URL = "https://generativelanguage.googleapis.com/v1beta/models/imagen-4.0-generate-001:predict"
 HEADERS = {
     "Authorization": f"Bearer {API_KEY}",
     "Content-Type": "application/json"
@@ -87,12 +86,12 @@ MAX_TOKENS_OPTIONS = [512, 1024, 2048, 4096, 8192]
 # === Клавиатура ===
 def get_main_keyboard():
     markup = ReplyKeyboardMarkup(row_width=2, resize_keyboard=True)
+    btn_models = KeyboardButton("🧠 Модели")
+    btn_settings = KeyboardButton("⚙️ Настройки")
     btn_reset = KeyboardButton("🔄 Сбросить историю")
     btn_help = KeyboardButton("ℹ️ Помощь")
     btn_status = KeyboardButton("📊 Статус")
-    btn_models = KeyboardButton("🧠 Модели")
-    btn_settings = KeyboardButton("⚙️ Настройки")
-    markup.add(btn_models, btn_settings, btn_reset, btn_help)
+    markup.add(btn_models, btn_settings, btn_reset, btn_help, btn_status)
     return markup
 
 # === История ===
@@ -382,8 +381,8 @@ def send_welcome(message):
     bot.send_message(chat_id,
                      f"Привет! Я бот на нейросети Gemini.\n"
                      f"Сейчас активна модель: {model_name}\n"
-                     f"Умею: текст, фото 🖼, голосовые 🎤 и генерацию картинок 🎨\n"
-                     f"Используй кнопки внизу или /models, /settings, /image",
+                     f"Умею: текст, фото 🖼 и голосовые 🎤\n"
+                     f"Используй кнопки внизу или /models, /settings",
                      reply_markup=get_main_keyboard())
 
 @bot.message_handler(commands=['help'])
@@ -393,12 +392,11 @@ def help_command(message):
         "• Отправь текст – отвечу.\n"
         "• Отправь фото – опишу.\n"
         "• Отправь голосовое – расшифрую и отвечу.\n"
-        "• /image <описание> – нарисую картинку.\n"
         "• 🧠 Модели – выбрать модель.\n"
         "• ⚙️ Настройки – контекст, температура, токены.\n"
         "• 🔄 Сбросить историю – очистить память.\n"
         "• 📊 Статус – текущие настройки.\n"
-        "• Команды: /start, /reset, /help, /stats, /models, /settings, /test, /image"
+        "• Команды: /start, /reset, /help, /stats, /models, /settings, /test"
     )
     bot.reply_to(message, help_text, reply_markup=get_main_keyboard())
 
@@ -443,38 +441,6 @@ def help_button(message):
 @bot.message_handler(func=lambda m: m.text == "📊 Статус")
 def status_button(message):
     stats_command(message)
-
-# === ГЕНЕРАЦИЯ КАРТИНОК ===
-@bot.message_handler(commands=['image'])
-def generate_image(message):
-    chat_id = message.chat.id
-    prompt = message.text.replace('/image', '', 1).strip()
-
-    if not prompt:
-        bot.reply_to(message, "🖼 Напиши, что нарисовать: `/image кот в космосе`", parse_mode="Markdown")
-        return
-
-    bot.send_message(chat_id, "🎨 Генерирую картинку, это займёт 10-15 секунд...")
-
-    try:
-        payload = {
-            "instances": [{"prompt": prompt}],
-            "parameters": {"sampleCount": 1}
-        }
-        response = requests.post(IMAGEN_URL, json=payload, headers=HEADERS, timeout=120)
-        data = response.json()
-
-        if 'predictions' not in data or not data['predictions']:
-            raise ValueError(f"Нет predictions: {str(data)[:300]}")
-
-        image_b64 = data['predictions'][0]['bytesBase64Encoded']
-        image_bytes = base64.b64decode(image_b64)
-
-        bot.send_photo(chat_id, image_bytes, reply_to_message_id=message.message_id)
-
-    except Exception as e:
-        print(f"Ошибка генерации: {e}", flush=True)
-        bot.reply_to(message, "❌ Не удалось сгенерировать картинку. Проверь, что биллинг включён в Google Cloud.", reply_markup=get_main_keyboard())
 
 # === ОБРАБОТКА ТЕКСТА ===
 @bot.message_handler(content_types=['text'])
@@ -584,7 +550,6 @@ def reply_voice(message):
         file_info = bot.get_file(message.voice.file_id)
         downloaded_file = bot.download_file(file_info.file_path)
 
-        # Конвертируем OGG в WAV через pydub
         audio = AudioSegment.from_file(BytesIO(downloaded_file), format="ogg")
         wav_buffer = BytesIO()
         audio.export(wav_buffer, format="wav")
@@ -613,7 +578,7 @@ def reply_voice(message):
 
     except Exception as e:
         print(f"Ошибка при голосовом: {e}", flush=True)
-        bot.reply_to(message, "❌ Не удалось обработать голосовое. Проверь, что FFmpeg установлен.", reply_markup=get_main_keyboard())
+        bot.reply_to(message, "❌ Не удалось обработать голосовое.", reply_markup=get_main_keyboard())
 
 # === Веб-сервер для Render ===
 if os.environ.get("PORT"):
