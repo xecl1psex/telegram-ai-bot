@@ -3,3 +3,4 @@ requests
 Pillow
 python-dotenv
 Flask
+pydub
