@@ -88,10 +88,11 @@ def get_main_keyboard():
     markup = ReplyKeyboardMarkup(row_width=2, resize_keyboard=True)
     btn_models = KeyboardButton("🧠 Модели")
     btn_settings = KeyboardButton("⚙️ Настройки")
+    btn_image = KeyboardButton("🎨 Нарисовать")
     btn_reset = KeyboardButton("🔄 Сбросить историю")
     btn_help = KeyboardButton("ℹ️ Помощь")
     btn_status = KeyboardButton("📊 Статус")
-    markup.add(btn_models, btn_settings, btn_reset, btn_help, btn_status)
+    markup.add(btn_models, btn_settings, btn_image, btn_reset, btn_help, btn_status)
     return markup
 
 # === История ===
@@ -381,8 +382,8 @@ def send_welcome(message):
     bot.send_message(chat_id,
                      f"Привет! Я бот на нейросети Gemini.\n"
                      f"Сейчас активна модель: {model_name}\n"
-                     f"Умею: текст, фото 🖼 и голосовые 🎤\n"
-                     f"Используй кнопки внизу или /models, /settings",
+                     f"Умею: текст, фото 🖼, голосовые 🎤 и генерацию картинок 🎨\n"
+                     f"Используй кнопки внизу или /models, /settings, /image",
                      reply_markup=get_main_keyboard())
 
 @bot.message_handler(commands=['help'])
@@ -392,6 +393,7 @@ def help_command(message):
         "• Отправь текст – отвечу.\n"
         "• Отправь фото – опишу.\n"
         "• Отправь голосовое – расшифрую и отвечу.\n"
+        "• 🎨 Нарисовать или /image <описание> – генерация картинок.\n"
         "• 🧠 Модели – выбрать модель.\n"
         "• ⚙️ Настройки – контекст, температура, токены.\n"
         "• 🔄 Сбросить историю – очистить память.\n"
@@ -429,6 +431,16 @@ def models_button(message):
 def settings_button(message):
     show_settings(message)
 
+@bot.message_handler(func=lambda m: m.text == "🎨 Нарисовать")
+def image_button(message):
+    bot.reply_to(
+        message,
+        "🎨 Напиши, что нарисовать, командой:\n"
+        "`/image кот в космосе`\n\n"
+        "Или просто отправь описание после этой команды.",
+        parse_mode="Markdown"
+    )
+
 @bot.message_handler(func=lambda m: m.text == "🔄 Сбросить историю")
 def reset_button(message):
     clear_history(message.chat.id)
@@ -441,6 +453,29 @@ def help_button(message):
 @bot.message_handler(func=lambda m: m.text == "📊 Статус")
 def status_button(message):
     stats_command(message)
+
+# === ГЕНЕРАЦИЯ КАРТИНОК через Pollinations.ai ===
+@bot.message_handler(commands=['image'])
+def generate_image_pollinations(message):
+    chat_id = message.chat.id
+    prompt = message.text.replace('/image', '', 1).strip()
+
+    if not prompt:
+        bot.reply_to(message, "🖼 Напиши, что нарисовать: `/image кот в космосе`", parse_mode="Markdown")
+        return
+
+    bot.send_message(chat_id, "🎨 Генерирую картинку через Pollinations.ai, это займёт 10-20 секунд...")
+
+    encoded_prompt = requests.utils.quote(prompt)
+    image_url = f"https://image.pollinations.ai/prompt/{encoded_prompt}"
+
+    try:
+        response = requests.get(image_url, timeout=120)
+        response.raise_for_status()
+        bot.send_photo(chat_id, response.content, reply_to_message_id=message.message_id)
+    except Exception as e:
+        print(f"Ошибка генерации (Pollinations): {e}", flush=True)
+        bot.reply_to(message, "❌ Не удалось сгенерировать картинку. Попробуй позже.", reply_markup=get_main_keyboard())
 
 # === ОБРАБОТКА ТЕКСТА ===
 @bot.message_handler(content_types=['text'])
