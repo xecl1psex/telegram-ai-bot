@@ -4,3 +4,4 @@ Pillow
 python-dotenv
 Flask
 pydub
+huggingface_hub
