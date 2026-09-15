@@ -21,7 +21,7 @@ load_dotenv()
 
 TOKEN = os.environ.get("BOT_TOKEN")
 API_KEY = os.environ.get("AI_API_KEY")
-HF_TOKEN = os.environ.get("HF_TOKEN")  # Токен Hugging Face
+HF_TOKEN = os.environ.get("HF_TOKEN")
 
 if not TOKEN:
     raise ValueError("Не задан BOT_TOKEN в переменных окружения")
@@ -38,7 +38,6 @@ HEADERS = {
 # === Настройки Hugging Face ===
 hf_client = InferenceClient(token=HF_TOKEN) if HF_TOKEN else None
 
-# ID популярных моделей Hugging Face для генерации
 HF_MODELS = {
     "flux_schnell": {
         "id": "black-forest-labs/FLUX.1-schnell",
@@ -80,8 +79,8 @@ user_thinking = {}
 user_history_len = {}
 user_temperature = {}
 user_max_tokens = {}
-user_image_service = {}   # "pollinations" or "huggingface"
-user_hf_model = {}        # ID модели Hugging Face
+user_image_service = {}
+user_hf_model = {}
 chat_history = {}
 
 # === Описания моделей Gemini ===
@@ -118,11 +117,11 @@ MAX_TOKENS_OPTIONS = [512, 1024, 2048, 4096, 8192]
 IMAGE_SERVICES = {
     "pollinations": {
         "name": "🍃 Pollinations.ai",
-        "desc": "Бесплатно, без ключа. Лимит: 1 запрос в 15 секунд. Есть водяной знак.",
+        "desc": "Бесплатно, без ключа. Лимит: 1 запрос в 15 секунд. Без водяного знака, случайный seed.",
     },
     "huggingface": {
         "name": "🤗 Hugging Face",
-        "desc": "Бесплатный токен, ~1000 запросов в день. Высокое качество, без водяного знака.",
+        "desc": "Бесплатный токен, ~300 запросов в час. Высокое качество, без водяного знака.",
     },
 }
 
@@ -228,9 +227,8 @@ def callback_set_image_service(call):
     chat_id = call.message.chat.id
     service_id = call.data.split(':', 1)[1]
     user_image_service[chat_id] = service_id
-    
+
     if service_id == "huggingface":
-        # Если выбран Hugging Face, показываем меню выбора модели
         markup = InlineKeyboardMarkup(row_width=1)
         current_model = user_hf_model.get(chat_id, "flux_schnell")
         for model_id, info in HF_MODELS.items():
@@ -595,11 +593,11 @@ def generate_image(message):
 
     service = user_image_service.get(chat_id, "pollinations")
 
-    # --- Pollinations ---
+    # --- Pollinations (seed=-1 для случайной генерации, nologo для убирания водяного знака) ---
     if service == "pollinations":
         bot.send_message(chat_id, "🍃 Генерирую через Pollinations.ai...")
         encoded_prompt = requests.utils.quote(prompt)
-        image_url = f"https://image.pollinations.ai/prompt/{encoded_prompt}"
+        image_url = f"https://image.pollinations.ai/prompt/{encoded_prompt}?seed=-1&nologo=true"
         try:
             response = requests.get(image_url, timeout=120)
             response.raise_for_status()
@@ -623,7 +621,6 @@ def generate_image(message):
                 prompt,
                 model=model_info["id"],
             )
-            # Конвертируем PIL Image в байты
             buff = BytesIO()
             image.save(buff, format="PNG")
             buff.seek(0)
