@@ -229,20 +229,23 @@ def send_long_message(chat_id, text, reply_to_message_id=None):
 
 # === ПЕРЕВОД ПРОМПТА (бесплатно, без Gemini) ===
 def translate_to_english(text):
+    # Основной вариант: Google Translate через clients5 (работает с Render)
     try:
         r = requests.get(
-            "https://api.mymemory.translated.net/get",
-            params={"q": text, "langpair": "ru|en"},
+            "https://clients5.google.com/translate_a/t",
+            params={"client": "dict-chrome-ex", "sl": "auto", "tl": "en", "q": text},
             timeout=15
         )
         data = r.json()
-        translated = data.get("responseData", {}).get("translatedText", "")
-        if translated and translated.lower() != text.lower():
-            print(f"✅ MyMemory: '{text}' → '{translated}'", flush=True)
-            return translated.strip()
+        if isinstance(data, list) and data and isinstance(data[0], list):
+            english = "".join(part[0] for part in data[0] if part)
+            if english and "MYMEMORY WARNING" not in english:
+                print(f"✅ Google: '{text}' → '{english}'", flush=True)
+                return english.strip()
     except Exception as e:
-        print(f"⚠️ MyMemory ошибка: {e}", flush=True)
+        print(f"⚠️ Google (clients5) ошибка: {e}", flush=True)
 
+    # Резерв: обычный Google Translate
     try:
         r = requests.get(
             "https://translate.googleapis.com/translate_a/single",
@@ -251,11 +254,11 @@ def translate_to_english(text):
         )
         data = r.json()
         english = "".join(part[0] for part in data[0] if part[0])
-        if english:
-            print(f"✅ Google: '{text}' → '{english}'", flush=True)
+        if english and "MYMEMORY" not in english:
+            print(f"✅ Google (gtx): '{text}' → '{english}'", flush=True)
             return english.strip()
     except Exception as e:
-        print(f"⚠️ Google Translate ошибка: {e}", flush=True)
+        print(f"⚠️ Google (gtx) ошибка: {e}", flush=True)
 
     print(f"❌ Перевод не удался: '{text}'", flush=True)
     return text
