@@ -229,7 +229,6 @@ def send_long_message(chat_id, text, reply_to_message_id=None):
 
 # === ПЕРЕВОД ПРОМПТА (бесплатно, без Gemini) ===
 def translate_to_english(text):
-    # 1. MyMemory — основной переводчик
     try:
         r = requests.get(
             "https://api.mymemory.translated.net/get",
@@ -244,7 +243,6 @@ def translate_to_english(text):
     except Exception as e:
         print(f"⚠️ MyMemory ошибка: {e}", flush=True)
 
-    # 2. Google Translate — резервный вариант
     try:
         r = requests.get(
             "https://translate.googleapis.com/translate_a/single",
@@ -261,7 +259,7 @@ def translate_to_english(text):
 
     print(f"❌ Перевод не удался: '{text}'", flush=True)
     return text
-
+    
 # === МЕНЮ ФОРМАТОВ ===
 def build_formats_keyboard(chat_id):
     markup = InlineKeyboardMarkup(row_width=1)
@@ -702,7 +700,7 @@ def generate_image(message):
     fmt_id = user_format.get(chat_id, DEFAULT_FORMAT)
     fmt = IMAGE_FORMATS[fmt_id]
 
-    # --- Pollinations (с API-ключом и бесплатным переводом) ---
+       # --- Pollinations ---
     if service == "pollinations":
         bot.send_message(chat_id, "🍃 Генерирую через Pollinations.ai...")
 
@@ -710,15 +708,27 @@ def generate_image(message):
         seed = random.randint(1, 999999999)
         encoded_prompt = requests.utils.quote(english_prompt)
 
+        # Проверяем, есть ли ключ
+        if POLLINATIONS_TOKEN:
+            print(f"🔑 POLLINATIONS_TOKEN найден, длина: {len(POLLINATIONS_TOKEN)}, начало: {POLLINATIONS_TOKEN[:6]}...", flush=True)
+        else:
+            print("⚠️ POLLINATIONS_TOKEN не задан!", flush=True)
+
         image_url = (
             f"https://image.pollinations.ai/prompt/{encoded_prompt}"
             f"?width={fmt['width']}&height={fmt['height']}"
             f"&seed={seed}&nologo=true&model=flux"
         )
 
+        # Добавляем ключ в URL-параметр (самый надёжный способ)
+        if POLLINATIONS_TOKEN:
+            image_url += f"&token={POLLINATIONS_TOKEN}"
+
         headers_img = {}
         if POLLINATIONS_TOKEN:
             headers_img["Authorization"] = f"Bearer {POLLINATIONS_TOKEN}"
+
+        print(f"🌐 URL: {image_url[:120]}...", flush=True)
 
         try:
             response = requests.get(image_url, headers=headers_img, timeout=120)
