@@ -208,40 +208,32 @@ def send_long_message(chat_id, text, reply_to_message_id=None):
             bot.send_message(chat_id, part)
         time.sleep(0.5)
 
-# === ПЕРЕВОД ПРОМПТА ===
+# === ПЕРЕВОД ПРОМПТА через Gemini 3.5 Flash-Lite ===
 def translate_to_english(text):
-    # Google Translate через clients5 (работает с облачных серверов)
+    """Перевод промпта через Gemini 3.5 Flash-Lite (500 запросов/день)."""
     try:
-        r = requests.get(
-            "https://clients5.google.com/translate_a/t",
-            params={"client": "dict-chrome-ex", "sl": "auto", "tl": "en", "q": text},
-            timeout=15
-        )
+        payload = {
+            "model": "gemini-3.5-flash-lite",
+            "messages": [{
+                "role": "user",
+                "content": f"Translate the following text to English. Output ONLY the English translation, without quotes, explanations, or extra words: {text}"
+            }],
+            "max_tokens": 300,
+            "temperature": 0.1
+        }
+        r = requests.post(AI_URL, json=payload, headers=HEADERS, timeout=30)
         data = r.json()
-        if isinstance(data, list) and data and isinstance(data[0], list):
-            english = "".join(part[0] for part in data[0] if part)
-            if english and "MYMEMORY WARNING" not in english:
-                print(f"✅ Google: '{text}' → '{english}'", flush=True)
-                return english.strip()
+        if 'choices' in data and data['choices']:
+            english = data['choices'][0]['message']['content'].strip()
+            english = english.strip('"\'')
+            if english and len(english) > 2:
+                print(f"✅ Перевод: '{text}' → '{english}'", flush=True)
+                return english
+        print(f"⚠️ Неожиданный ответ Gemini: {str(data)[:300]}", flush=True)
     except Exception as e:
-        print(f"⚠️ Google (clients5) ошибка: {e}", flush=True)
+        print(f"⚠️ Ошибка перевода: {e}", flush=True)
 
-    # Резерв
-    try:
-        r = requests.get(
-            "https://translate.googleapis.com/translate_a/single",
-            params={"client": "gtx", "sl": "auto", "tl": "en", "dt": "t", "q": text},
-            timeout=15
-        )
-        data = r.json()
-        english = "".join(part[0] for part in data[0] if part[0])
-        if english and "MYMEMORY" not in english:
-            print(f"✅ Google (gtx): '{text}' → '{english}'", flush=True)
-            return english.strip()
-    except Exception as e:
-        print(f"⚠️ Google (gtx) ошибка: {e}", flush=True)
-
-    print(f"❌ Перевод не удался: '{text}'", flush=True)
+    print(f"❌ Перевод не удался, используем оригинал", flush=True)
     return text
 
 # === МЕНЮ ФОРМАТОВ ===
@@ -632,7 +624,7 @@ def help_button(message):
 def status_button(message):
     stats_command(message)
 
-# === ГЕНЕРАЦИЯ КАРТИНОК (только Hugging Face) ===
+# === ГЕНЕРАЦИЯ КАРТИНОК (Hugging Face) ===
 @bot.message_handler(commands=['image'])
 def generate_image(message):
     chat_id = message.chat.id
@@ -676,6 +668,8 @@ def generate_image(message):
             bot.reply_to(message, "⏳ Модель загружается на сервере. Попробуй ещё раз через 20-30 секунд.", reply_markup=get_main_keyboard())
         elif "429" in error_str:
             bot.reply_to(message, "⏳ Слишком много запросов. Подожди минуту и попробуй снова.", reply_markup=get_main_keyboard())
+        elif "402" in error_str or "Payment Required" in error_str:
+            bot.reply_to(message, "💳 Эта модель требует платный доступ. Выбери другую в меню 🎨 Модель картинок.", reply_markup=get_main_keyboard())
         elif "width" in error_str.lower() or "height" in error_str.lower():
             bot.reply_to(message, "⚠️ Эта модель не поддерживает выбранный формат. Попробуй квадрат или другую модель.", reply_markup=get_main_keyboard())
         else:
