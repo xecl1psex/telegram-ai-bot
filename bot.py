@@ -59,7 +59,7 @@ HF_MODELS = {
 bot = telebot.TeleBot(TOKEN)
 
 # === Настройки по умолчанию ===
-DEFAULT_MODEL = "gemini-3.8-flash"
+DEFAULT_MODEL = "gemini-3.5-flash-lite"
 DEFAULT_THINKING = "medium"
 DEFAULT_HISTORY_LEN = 6
 DEFAULT_TEMPERATURE = 0.7
