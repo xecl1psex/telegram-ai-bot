@@ -229,22 +229,38 @@ def send_long_message(chat_id, text, reply_to_message_id=None):
 
 # === ПЕРЕВОД ПРОМПТА (бесплатно, без Gemini) ===
 def translate_to_english(text):
+    # 1. MyMemory — основной переводчик
     try:
-        translate_url = "https://translate.googleapis.com/translate_a/single"
-        params = {
-            "client": "gtx",
-            "sl": "auto",
-            "tl": "en",
-            "dt": "t",
-            "q": text,
-        }
-        r = requests.get(translate_url, params=params, timeout=15)
+        r = requests.get(
+            "https://api.mymemory.translated.net/get",
+            params={"q": text, "langpair": "ru|en"},
+            timeout=15
+        )
+        data = r.json()
+        translated = data.get("responseData", {}).get("translatedText", "")
+        if translated and translated.lower() != text.lower():
+            print(f"✅ MyMemory: '{text}' → '{translated}'", flush=True)
+            return translated.strip()
+    except Exception as e:
+        print(f"⚠️ MyMemory ошибка: {e}", flush=True)
+
+    # 2. Google Translate — резервный вариант
+    try:
+        r = requests.get(
+            "https://translate.googleapis.com/translate_a/single",
+            params={"client": "gtx", "sl": "auto", "tl": "en", "dt": "t", "q": text},
+            timeout=15
+        )
         data = r.json()
         english = "".join(part[0] for part in data[0] if part[0])
-        return english.strip() if english else text
+        if english:
+            print(f"✅ Google: '{text}' → '{english}'", flush=True)
+            return english.strip()
     except Exception as e:
-        print(f"Ошибка перевода: {e}", flush=True)
-        return text
+        print(f"⚠️ Google Translate ошибка: {e}", flush=True)
+
+    print(f"❌ Перевод не удался: '{text}'", flush=True)
+    return text
 
 # === МЕНЮ ФОРМАТОВ ===
 def build_formats_keyboard(chat_id):
