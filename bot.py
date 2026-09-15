@@ -1,6 +1,7 @@
 import os
 import base64
 import time
+import random
 import threading
 from io import BytesIO
 from PIL import Image
@@ -22,6 +23,7 @@ load_dotenv()
 TOKEN = os.environ.get("BOT_TOKEN")
 API_KEY = os.environ.get("AI_API_KEY")
 HF_TOKEN = os.environ.get("HF_TOKEN")
+POLLINATIONS_TOKEN = os.environ.get("POLLINATIONS_TOKEN")
 
 if not TOKEN:
     raise ValueError("Не задан BOT_TOKEN в переменных окружения")
@@ -69,6 +71,7 @@ DEFAULT_THINKING = "medium"
 DEFAULT_HISTORY_LEN = 6
 DEFAULT_TEMPERATURE = 0.7
 DEFAULT_MAX_TOKENS = 4096
+DEFAULT_FORMAT = "square"
 
 MAX_SAVED_ANSWER_LEN = 800
 TIMEOUT = 600
@@ -81,6 +84,7 @@ user_temperature = {}
 user_max_tokens = {}
 user_image_service = {}
 user_hf_model = {}
+user_format = {}
 chat_history = {}
 
 # === Описания моделей Gemini ===
@@ -113,15 +117,37 @@ HISTORY_OPTIONS = [3, 6, 10, 20, 50]
 TEMPERATURE_OPTIONS = [0.0, 0.3, 0.7, 1.0, 1.5]
 MAX_TOKENS_OPTIONS = [512, 1024, 2048, 4096, 8192]
 
+# === Форматы изображений ===
+IMAGE_FORMATS = {
+    "square": {
+        "name": "⬛ Квадрат (1:1)",
+        "desc": "1024×1024. Универсальный формат.",
+        "width": 1024,
+        "height": 1024,
+    },
+    "wide": {
+        "name": "🖼 Широкий (16:9)",
+        "desc": "1344×768. Для пейзажей, баннеров, обоев.",
+        "width": 1344,
+        "height": 768,
+    },
+    "portrait": {
+        "name": "📱 Вертикальный (9:16)",
+        "desc": "768×1344. Для портретов, сторис, мобильных обоев.",
+        "width": 768,
+        "height": 1344,
+    },
+}
+
 # === Описания сервисов генерации ===
 IMAGE_SERVICES = {
     "pollinations": {
         "name": "🍃 Pollinations.ai",
-        "desc": "Бесплатно, без ключа. Лимит: 1 запрос в 15 секунд. Без водяного знака, случайный seed.",
+        "desc": "API-ключ подключён. Без водяного знака, стабильные лимиты.",
     },
     "huggingface": {
         "name": "🤗 Hugging Face",
-        "desc": "Бесплатный токен, ~300 запросов в час. Высокое качество, без водяного знака.",
+        "desc": "Бесплатный токен, ~300 запросов в час. Высокое качество.",
     },
 }
 
@@ -132,10 +158,11 @@ def get_main_keyboard():
     btn_settings = KeyboardButton("⚙️ Настройки")
     btn_image = KeyboardButton("🎨 Нарисовать")
     btn_img_service = KeyboardButton("🖼 Сервис картинок")
+    btn_format = KeyboardButton("📐 Формат")
     btn_reset = KeyboardButton("🔄 Сбросить историю")
     btn_help = KeyboardButton("ℹ️ Помощь")
     btn_status = KeyboardButton("📊 Статус")
-    markup.add(btn_models, btn_settings, btn_image, btn_img_service, btn_reset, btn_help, btn_status)
+    markup.add(btn_models, btn_settings, btn_image, btn_img_service, btn_format, btn_reset, btn_help, btn_status)
     return markup
 
 # === История ===
@@ -199,6 +226,61 @@ def send_long_message(chat_id, text, reply_to_message_id=None):
         else:
             bot.send_message(chat_id, part)
         time.sleep(0.5)
+
+# === ПЕРЕВОД ПРОМПТА (бесплатно, без Gemini) ===
+def translate_to_english(text):
+    try:
+        translate_url = "https://translate.googleapis.com/translate_a/single"
+        params = {
+            "client": "gtx",
+            "sl": "auto",
+            "tl": "en",
+            "dt": "t",
+            "q": text,
+        }
+        r = requests.get(translate_url, params=params, timeout=15)
+        data = r.json()
+        english = "".join(part[0] for part in data[0] if part[0])
+        return english.strip() if english else text
+    except Exception as e:
+        print(f"Ошибка перевода: {e}", flush=True)
+        return text
+
+# === МЕНЮ ФОРМАТОВ ===
+def build_formats_keyboard(chat_id):
+    markup = InlineKeyboardMarkup(row_width=1)
+    current = user_format.get(chat_id, DEFAULT_FORMAT)
+    for fmt_id, info in IMAGE_FORMATS.items():
+        check = " ✅" if fmt_id == current else ""
+        markup.add(InlineKeyboardButton(
+            text=f"{info['name']}{check}",
+            callback_data=f"set_format:{fmt_id}"
+        ))
+    return markup
+
+@bot.message_handler(commands=['format'])
+def show_formats(message):
+    chat_id = message.chat.id
+    bot.send_message(
+        chat_id,
+        "📐 *Выбери формат изображения:*",
+        reply_markup=build_formats_keyboard(chat_id),
+        parse_mode="Markdown"
+    )
+
+@bot.callback_query_handler(func=lambda call: call.data.startswith('set_format:'))
+def callback_set_format(call):
+    chat_id = call.message.chat.id
+    fmt_id = call.data.split(':', 1)[1]
+    user_format[chat_id] = fmt_id
+    info = IMAGE_FORMATS[fmt_id]
+    bot.answer_callback_query(call.id, f"Формат: {info['name']}")
+    bot.edit_message_text(
+        chat_id=chat_id,
+        message_id=call.message.message_id,
+        text=f"✅ Формат: *{info['name']}*\n\n{info['desc']}",
+        parse_mode="Markdown"
+    )
 
 # === МЕНЮ СЕРВИСОВ ГЕНЕРАЦИИ ===
 def build_image_services_keyboard(chat_id):
@@ -493,12 +575,14 @@ def send_welcome(message):
     clear_history(chat_id)
     model_name = MODEL_INFO[user_models.get(chat_id, DEFAULT_MODEL)]["name"]
     service_name = IMAGE_SERVICES[user_image_service.get(chat_id, "pollinations")]["name"]
+    format_name = IMAGE_FORMATS[user_format.get(chat_id, DEFAULT_FORMAT)]["name"]
     bot.send_message(chat_id,
                      f"Привет! Я бот на нейросети Gemini.\n"
-                     f"Сейчас активна модель: {model_name}\n"
-                     f"Сервис картинок: {service_name}\n"
-                     f"Умею: текст, фото 🖼, голосовые 🎤 и генерацию картинок 🎨\n"
-                     f"Используй кнопки внизу или /models, /settings, /image_service, /image",
+                     f"🧠 Модель: {model_name}\n"
+                     f"🖼 Сервис картинок: {service_name}\n"
+                     f"📐 Формат: {format_name}\n"
+                     f"Умею: текст, фото, голосовые и генерацию картинок.\n"
+                     f"Используй кнопки внизу или /models, /settings, /image_service, /format, /image",
                      reply_markup=get_main_keyboard())
 
 @bot.message_handler(commands=['help'])
@@ -510,11 +594,12 @@ def help_command(message):
         "• Отправь голосовое – расшифрую и отвечу.\n"
         "• 🎨 Нарисовать или /image <описание> – генерация картинок.\n"
         "• 🖼 Сервис картинок или /image_service – выбрать сервис (Pollinations/Hugging Face).\n"
+        "• 📐 Формат или /format – выбрать формат (квадрат/широкий/вертикальный).\n"
         "• 🧠 Модели – выбрать модель Gemini.\n"
         "• ⚙️ Настройки – контекст, температура, токены.\n"
         "• 🔄 Сбросить историю – очистить память.\n"
         "• 📊 Статус – текущие настройки.\n"
-        "• Команды: /start, /reset, /help, /stats, /models, /settings, /test, /image, /image_service"
+        "• Команды: /start, /reset, /help, /stats, /models, /settings, /test, /image, /image_service, /format"
     )
     bot.reply_to(message, help_text, reply_markup=get_main_keyboard())
 
@@ -529,6 +614,7 @@ def stats_command(message):
     temp = user_temperature.get(chat_id, DEFAULT_TEMPERATURE)
     tokens = user_max_tokens.get(chat_id, DEFAULT_MAX_TOKENS)
     service = user_image_service.get(chat_id, "pollinations")
+    fmt = user_format.get(chat_id, DEFAULT_FORMAT)
     if service == "huggingface":
         hf_model_id = user_hf_model.get(chat_id, "flux_schnell")
         service_name = f"{IMAGE_SERVICES[service]['name']} ({HF_MODELS[hf_model_id]['name']})"
@@ -541,7 +627,8 @@ def stats_command(message):
                  f"📏 Контекст: {hist_len}\n"
                  f"🎲 Температура: {temp}\n"
                  f"📝 Макс. токенов: {tokens}\n"
-                 f"🖼 Сервис картинок: {service_name}\n\n"
+                 f"🖼 Сервис картинок: {service_name}\n"
+                 f"📐 Формат: {IMAGE_FORMATS[fmt]['name']}\n\n"
                  f"Сообщений в истории: {len(history)}\n"
                  f"Размер: {total_chars} символов (~{total_chars//4} токенов)",
                  reply_markup=get_main_keyboard(), parse_mode="Markdown")
@@ -560,13 +647,17 @@ def image_button(message):
         message,
         "🎨 Напиши, что нарисовать, командой:\n"
         "`/image кот в космосе`\n\n"
-        "Или просто отправь описание после этой команды.",
+        "Промпт можно на русском — я переведу на английский автоматически.",
         parse_mode="Markdown"
     )
 
 @bot.message_handler(func=lambda m: m.text == "🖼 Сервис картинок")
 def image_service_button(message):
     show_image_services(message)
+
+@bot.message_handler(func=lambda m: m.text == "📐 Формат")
+def format_button(message):
+    show_formats(message)
 
 @bot.message_handler(func=lambda m: m.text == "🔄 Сбросить историю")
 def reset_button(message):
@@ -592,19 +683,34 @@ def generate_image(message):
         return
 
     service = user_image_service.get(chat_id, "pollinations")
+    fmt_id = user_format.get(chat_id, DEFAULT_FORMAT)
+    fmt = IMAGE_FORMATS[fmt_id]
 
-    # --- Pollinations (seed=-1 для случайной генерации, nologo для убирания водяного знака) ---
+    # --- Pollinations (с API-ключом и бесплатным переводом) ---
     if service == "pollinations":
         bot.send_message(chat_id, "🍃 Генерирую через Pollinations.ai...")
-        encoded_prompt = requests.utils.quote(prompt)
-        image_url = f"https://image.pollinations.ai/prompt/{encoded_prompt}?seed=-1&nologo=true"
+
+        english_prompt = translate_to_english(prompt)
+        seed = random.randint(1, 999999999)
+        encoded_prompt = requests.utils.quote(english_prompt)
+
+        image_url = (
+            f"https://image.pollinations.ai/prompt/{encoded_prompt}"
+            f"?width={fmt['width']}&height={fmt['height']}"
+            f"&seed={seed}&nologo=true&model=flux"
+        )
+
+        headers_img = {}
+        if POLLINATIONS_TOKEN:
+            headers_img["Authorization"] = f"Bearer {POLLINATIONS_TOKEN}"
+
         try:
-            response = requests.get(image_url, timeout=120)
+            response = requests.get(image_url, headers=headers_img, timeout=120)
             response.raise_for_status()
             bot.send_photo(chat_id, response.content, reply_to_message_id=message.message_id)
         except Exception as e:
             print(f"Ошибка Pollinations: {e}", flush=True)
-            bot.reply_to(message, "❌ Pollinations не ответил. Попробуй позже или выбери другой сервис.", reply_markup=get_main_keyboard())
+            bot.reply_to(message, "❌ Pollinations не ответил. Попробуй позже или выбери Hugging Face.", reply_markup=get_main_keyboard())
 
     # --- Hugging Face ---
     elif service == "huggingface":
@@ -616,10 +722,14 @@ def generate_image(message):
         model_info = HF_MODELS[hf_model_id]
         bot.send_message(chat_id, f"🤗 Генерирую через Hugging Face ({model_info['name']})...\nЭто может занять 15-30 секунд.")
 
+        english_prompt = translate_to_english(prompt)
+
         try:
             image = hf_client.text_to_image(
-                prompt,
+                english_prompt,
                 model=model_info["id"],
+                width=fmt['width'],
+                height=fmt['height'],
             )
             buff = BytesIO()
             image.save(buff, format="PNG")
@@ -677,7 +787,7 @@ def reply_text(message):
             if attempt == 2:
                 bot.reply_to(message, "❌ Не удалось получить ответ. Напиши /test.", reply_markup=get_main_keyboard())
             else:
-                time.sleep(2)
+                time.sleep(2 * (attempt + 1))
 
 # === ОБРАБОТКА ФОТО ===
 @bot.message_handler(content_types=['photo'])
@@ -728,7 +838,7 @@ def reply_photo(message):
             if attempt == 2:
                 bot.reply_to(message, "❌ Не удалось обработать фото.", reply_markup=get_main_keyboard())
             else:
-                time.sleep(2)
+                time.sleep(2 * (attempt + 1))
 
 # === ОБРАБОТКА ГОЛОСОВЫХ ===
 @bot.message_handler(content_types=['voice'])
