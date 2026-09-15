@@ -54,11 +54,6 @@ HF_MODELS = {
         "name": "🖼 Stable Diffusion 3 Medium",
         "desc": "Классическая модель от Stability AI. Хороший баланс качества и скорости.",
     },
-    "sdxl": {
-        "id": "stabilityai/stable-diffusion-xl-base-1.0",
-        "name": "🚀 SDXL Base 1.0",
-        "desc": "Проверенная модель с широкими возможностями настройки.",
-    },
 }
 
 bot = telebot.TeleBot(TOKEN)
