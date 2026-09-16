@@ -1,4 +1,6 @@
 import os
+import re
+import html
 import base64
 import time
 import threading
@@ -180,33 +182,113 @@ def update_history(chat_id, role, content):
 def clear_history(chat_id):
     chat_history[chat_id] = [{"role": "system", "content": "Ты — полезный ИИ-ассистент. Отвечай кратко и по делу."}]
 
-# === Длинные сообщения ===
+# === Форматирование Markdown -> HTML для Telegram ===
+def format_plain_text(text):
+    """Экранирует HTML и превращает `inline code` в <code>...</code>."""
+    escaped = html.escape(text, quote=False)
+    escaped = re.sub(r'`([^`\n]+)`', r'<code>\1</code>', escaped)
+    return escaped
+
+
+def markdown_to_html(text):
+    """Превращает ```блоки кода``` в <pre><code>...</code></pre>."""
+    # Разбиваем по блокам кода: ```lang\n...\n```
+    parts = re.split(r'```(\w*)\n?(.*?)```', text, flags=re.DOTALL)
+    result = []
+    i = 0
+    while i < len(parts):
+        if i % 3 == 0:
+            # обычный текст (вне блока кода)
+            result.append(format_plain_text(parts[i]))
+            i += 1
+        elif i % 3 == 1:
+            # язык + сам код
+            lang = parts[i]
+            code = parts[i + 1] if i + 1 < len(parts) else ""
+            escaped_code = html.escape(code, quote=False)
+            if lang:
+                result.append(
+                    f'<pre><code class="language-{lang}">{escaped_code}</code></pre>'
+                )
+            else:
+                result.append(f'<pre>{escaped_code}</pre>')
+            i += 2
+        else:
+            result.append(html.escape(parts[i], quote=False))
+            i += 1
+    return ''.join(result)
+
+
+def split_for_telegram(text, max_len=3500):
+    """Делит текст так, чтобы блоки кода оставались целыми."""
+    if len(text) <= max_len:
+        return [text]
+
+    parts = re.split(r'(```\w*\n?.*?```)', text, flags=re.DOTALL)
+    chunks, current = [], ""
+
+    for part in parts:
+        if not part:
+            continue
+        if len(current) + len(part) <= max_len:
+            current += part
+        else:
+            if current:
+                chunks.append(current)
+            if len(part) > max_len:
+                # очень длинный кусок — режем по абзацам/строкам
+                remaining = part
+                while len(remaining) > max_len:
+                    sub = remaining[:max_len]
+                    cut = -1
+                    for sep in ('\n\n', '\n', '. ', ' '):
+                        p = sub.rfind(sep)
+                        if p > max_len // 2:
+                            cut = p + len(sep)
+                            break
+                    if cut == -1:
+                        cut = max_len
+                    chunks.append(remaining[:cut])
+                    remaining = remaining[cut:]
+                current = remaining
+            else:
+                current = part
+
+    if current:
+        chunks.append(current)
+    return chunks
+
+
 def send_long_message(chat_id, text, reply_to_message_id=None):
     if not text:
         return
-    if len(text) <= 4096:
-        bot.send_message(chat_id, text, reply_to_message_id=reply_to_message_id)
-        return
-    parts = []
-    while text:
-        if len(text) <= 4096:
-            parts.append(text)
-            break
-        split_pos = text[:4096].rfind('. ')
-        if split_pos == -1:
-            split_pos = text[:4096].rfind(' ')
-        if split_pos == -1:
-            split_pos = 4096
-        else:
-            split_pos += 1
-        parts.append(text[:split_pos])
-        text = text[split_pos:]
-    for i, part in enumerate(parts):
-        if i == 0:
-            bot.send_message(chat_id, part, reply_to_message_id=reply_to_message_id)
-        else:
-            bot.send_message(chat_id, part)
-        time.sleep(0.5)
+
+    chunks = split_for_telegram(text)
+
+    for i, chunk in enumerate(chunks):
+        html_chunk = markdown_to_html(chunk)
+        try:
+            if i == 0:
+                bot.send_message(
+                    chat_id, html_chunk,
+                    parse_mode='HTML',
+                    reply_to_message_id=reply_to_message_id
+                )
+            else:
+                bot.send_message(chat_id, html_chunk, parse_mode='HTML')
+        except Exception as e:
+            # fallback — если HTML почему-то не прошёл, шлём как обычный текст
+            print(f"⚠️ HTML не прошёл, отправляю как plain: {e}", flush=True)
+            if i == 0:
+                bot.send_message(
+                    chat_id, chunk,
+                    reply_to_message_id=reply_to_message_id
+                )
+            else:
+                bot.send_message(chat_id, chunk)
+
+        if i < len(chunks) - 1:
+            time.sleep(0.5)
 
 # === ПЕРЕВОД ПРОМПТА через Gemini 3.5 Flash-Lite ===
 def translate_to_english(text):
