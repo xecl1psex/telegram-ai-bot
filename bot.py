@@ -536,7 +536,6 @@ def parse_gemini_json(raw_reply):
     return parsed
 
 def build_system_prompt(user, db):
-    """Единый системный промпт для text / voice / photo."""
     now = now_local()
     today_str = now.strftime("%Y-%m-%d")
     weekday_str = WEEKDAYS_RU[now.weekday()]
@@ -547,27 +546,39 @@ def build_system_prompt(user, db):
         "Ты — ассистент. Отвечай кратко.\n\n"
         f"Дата: {today_str} ({weekday_str}), {time_str} МСК.\n\n"
         f"Данные пользователя:\n{finance_summary}\n\n"
-        "Если есть данные — используй их. Если нет — заполни query.\n"
-        "Также распознавай:\n"
-        "- полезное действие → xp (5-100)\n"
-        "- трата/доход → money, category\n"
-        "- напоминание/задача → task\n"
-        "- вопрос про финансы → query\n\n"
-        "ВАЖНО по задачам:\n"
-        "- Разовые (one_time) требуют description и время. Если сказано «в четверг» без времени — "
-        "найди ближайший четверг, поставь date=YYYY-MM-DD, time=09:00.\n"
+        "=== ФИНАНСЫ — ВАЖНО ===\n"
+        "Используй РАЗНЫЕ поля в зависимости от того, что сказал пользователь:\n\n"
+        "1) money — ИЗМЕНИТЬ баланс (прибавить или вычесть):\n"
+        "   • «потратил 500 на еду» → money: -500, category: \"Еда\"\n"
+        "   • «купил кофе 300» → money: -300, category: \"Кафе\"\n"
+        "   • «зарплата 50000» → money: 50000, category: \"Зарплата\"\n"
+        "   • «получил 1000» → money: 1000\n\n"
+        "2) set_balance — УСТАНОВИТЬ баланс в точное значение (ЗАМЕНИТЬ, а не прибавить):\n"
+        "   • «установи баланс 3327.62» → set_balance: 3327.62\n"
+        "   • «мой баланс 5000» → set_balance: 5000\n"
+        "   • «на карте 3327.62» → set_balance: 3327.62\n"
+        "   • «пусть баланс будет 1000» → set_balance: 1000\n"
+        "   • «запиши что баланс 3327.62» → set_balance: 3327.62\n"
+        "   • «не вычитай, а просто установи 3327» → set_balance: 3327\n"
+        "   • «измени баланс на 3000» → set_balance: 3000\n\n"
+        "ВАЖНО: если пользователь называет точное число и хочет, чтобы баланс СТАЛ таким — используй set_balance, а money: 0.\n"
+        "Если пользователь ЗАРАБОТАЛ или ПОТРАТИЛ — используй money, а set_balance: null.\n\n"
+        "=== ЗАДАЧИ ===\n"
+        "- Разовые (one_time): description + date (YYYY-MM-DD) + time (HH:MM). "
+        "Если «в четверг» без времени — найди ближайший четверг, time=09:00.\n"
         "- Ежедневные (daily): description + time (HH:MM).\n"
         "- Еженедельные (weekly): description + time + days (Mon,Wed).\n"
-        "- ВСЕГДА заполняй task, если пользователь просит напомнить / поставить задачу / не забыть.\n\n"
+        "- Заполняй task всегда, когда просят напомнить / поставить задачу / не забыть.\n\n"
+        "=== ОСТАЛЬНОЕ ===\n"
+        "- полезное действие → xp (5-100)\n"
+        "- вопрос про финансы → query\n\n"
         "Ответ — один JSON:\n"
-        "{\"reply\": \"...\", \"xp\": 0, \"money\": 0, \"category\": \"\", \"task\": null, \"query\": null}\n\n"
+        "{\"reply\": \"...\", \"xp\": 0, \"money\": 0, \"set_balance\": null, \"category\": \"\", \"task\": null, \"query\": null}\n\n"
         "task: {\"description\": \"...\", \"type\": \"one_time|daily|weekly\", \"date\": \"YYYY-MM-DD\", \"time\": \"HH:MM\", \"days\": \"Mon,Wed\"}\n"
         "query: {\"type\": \"expenses_by_category|income_by_category|recent_transactions|balance|top_categories\", \"category\": \"...\", \"period\": \"week|month|all\", \"limit\": 10}"
     )
 
 def handle_parsed_response(parsed, user, db, user_text, chat_id, message_id, now):
-    """Единая логика обработки распарсенного JSON от Gemini.
-    Возвращает финальный текст для отправки."""
     reply_text_out = (
         parsed.get("reply") or parsed.get("response") or parsed.get("message")
         or parsed.get("text") or parsed.get("content")
@@ -589,6 +600,17 @@ def handle_parsed_response(parsed, user, db, user_text, chat_id, message_id, now
         money_change = float(parsed.get("money", 0) or 0)
     except (ValueError, TypeError):
         money_change = 0.0
+
+    # НОВОЕ: set_balance — ЗАМЕНИТЬ баланс
+    set_balance = parsed.get("set_balance")
+    if set_balance is not None:
+        try:
+            new_balance = float(set_balance)
+            user.balance = new_balance
+            reply_text_out += f"\n💰 Баланс установлен: {user.balance:.2f}"
+            # Установка баланса не считается доходом — не пишем транзакцию
+        except (ValueError, TypeError):
+            set_balance = None
 
     category = parsed.get("category") or "Разное"
     task_data = parsed.get("task")
@@ -1212,7 +1234,8 @@ def send_welcome(message):
         "**Примеры:**\n"
         "• «Завтра в 15:00 позвонить врачу»\n"
         "• «Каждый день в 8:00 выпить воду»\n"
-        "• «Потратил 500 на еду»\n\n"
+        "• «Потратил 500 на еду»\n"
+        "• «Установи баланс 5000»\n\n"
         "Полный список команд — `/help`"
     )
     bot.send_message(chat_id, text, parse_mode="Markdown", reply_markup=get_main_keyboard())
@@ -1236,8 +1259,10 @@ def help_command(message):
         "• `/tasks` — список задач\n"
         "Напомню за 5 минут до времени.\n\n"
         "**💰 Финансы**\n"
-        "• «Потратил 500 на еду» — трата\n"
-        "• «Зарплата 50000» — доход\n"
+        "• «Потратил 500 на еду» — трата (−500)\n"
+        "• «Зарплата 50000» — доход (+50000)\n"
+        "• «Установи баланс 3327» — заменить баланс\n"
+        "• «Мой баланс 5000» — заменить баланс\n"
         "• Спрашивай: «сколько потратил на еду за месяц?»\n\n"
         "**🏆 Прогресс**\n"
         "• `/profile` — уровень, XP, баланс\n"
@@ -1375,7 +1400,6 @@ def reply_text(message):
                 update_history(chat_id, "assistant", raw_reply)
                 break
 
-            # Обработка query (второй вызов Gemini)
             query = parsed.get("query")
             if query and isinstance(query, dict):
                 print(f"🔍 {query}", flush=True)
@@ -1386,7 +1410,7 @@ def reply_text(message):
                     {"role": "assistant", "content": raw_reply},
                     {"role": "user", "content": (
                         f"Результат запроса: {json.dumps(query_result, ensure_ascii=False, default=str)}\n"
-                        "Сформулируй финальный ответ. JSON: {\"reply\": \"...\", \"xp\": 0, \"money\": 0, \"category\": \"\", \"task\": null, \"query\": null}"
+                        "Сформулируй финальный ответ. JSON: {\"reply\": \"...\", \"xp\": 0, \"money\": 0, \"set_balance\": null, \"category\": \"\", \"task\": null, \"query\": null}"
                     )}
                 ]
                 raw_reply = call_gemini(second_messages, user.model, user.temperature, user.max_tokens)
