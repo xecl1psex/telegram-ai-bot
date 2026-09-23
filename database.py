@@ -31,14 +31,15 @@ class User(Base):
 class Task(Base):
     __tablename__ = "tasks"
     id = Column(Integer, primary_key=True, index=True)
-    user_id = Column(Integer, ForeignKey("users.id"))  # ← теперь users.id
+    user_id = Column(Integer, ForeignKey("users.id"))
     description = Column(String)
-    task_type = Column(String)  # "one_time", "daily", "weekly"
+    task_type = Column(String)
     time_str = Column(String)
     days = Column(String)
     streak = Column(Integer, default=0)
     last_completed = Column(DateTime, nullable=True)
     is_active = Column(Boolean, default=True)
+    reminder_sent = Column(String, nullable=True)  # ← НОВОЕ: дата+время последнего напоминания
 
 class Transaction(Base):
     __tablename__ = "transactions"
