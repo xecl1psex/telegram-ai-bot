@@ -7,14 +7,15 @@ DATABASE_URL = os.environ.get("DATABASE_URL")
 if not DATABASE_URL:
     raise ValueError("Не задан DATABASE_URL")
 
-engine = create_engine(DATABASE_URL)
+# pool_pre_ping=True — чтобы не отваливались старые соединения к Neon
+engine = create_engine(DATABASE_URL, pool_pre_ping=True)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 Base = declarative_base()
 
 class User(Base):
     __tablename__ = "users"
-    id = Column(Integer, primary_key=True, index=True)
-    telegram_id = Column(Integer, unique=True, index=True)
+    id = Column(Integer, primary_key=True, index=True)  # ← внутренний ID (для FK)
+    telegram_id = Column(Integer, unique=True, index=True, nullable=False)  # ← ID из Telegram
     xp = Column(Integer, default=0)
     level = Column(Integer, default=0)
     balance = Column(Float, default=0.0)
@@ -30,11 +31,11 @@ class User(Base):
 class Task(Base):
     __tablename__ = "tasks"
     id = Column(Integer, primary_key=True, index=True)
-    user_id = Column(Integer, ForeignKey("users.telegram_id"))
+    user_id = Column(Integer, ForeignKey("users.id"))  # ← теперь users.id
     description = Column(String)
     task_type = Column(String)  # "one_time", "daily", "weekly"
-    time_str = Column(String)   # "15:00"
-    days = Column(String)       # "Mon,Wed" для еженедельных
+    time_str = Column(String)
+    days = Column(String)
     streak = Column(Integer, default=0)
     last_completed = Column(DateTime, nullable=True)
     is_active = Column(Boolean, default=True)
@@ -42,7 +43,7 @@ class Task(Base):
 class Transaction(Base):
     __tablename__ = "transactions"
     id = Column(Integer, primary_key=True, index=True)
-    user_id = Column(Integer, ForeignKey("users.telegram_id"))
+    user_id = Column(Integer, ForeignKey("users.id"))  # ← теперь users.id
     amount = Column(Float)
     category = Column(String)
     description = Column(String)
