@@ -5,3 +5,4 @@ python-dotenv
 Flask
 pydub
 huggingface_hub
+apscheduler==3.10.4
