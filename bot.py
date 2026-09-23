@@ -78,7 +78,17 @@ DEFAULT_HF_MODEL = "sdxl"
 MAX_SAVED_ANSWER_LEN = 800
 TIMEOUT = 600
 
-# === Память пользователей (история чата оставлена в памяти для простоты) ===
+# Часовой пояс для напоминаний
+TIMEZONE = "Europe/Moscow"
+WEEKDAYS_RU = {
+    0: "Пн", 1: "Вт", 2: "Ср", 3: "Чт", 4: "Пт", 5: "Сб", 6: "Вс"
+}
+WEEKDAYS_MAP = {
+    "mon": 0, "tue": 1, "wed": 2, "thu": 3, "fri": 4, "sat": 5, "sun": 6,
+    "пн": 0, "вт": 1, "ср": 2, "чт": 3, "пт": 4, "сб": 5, "вс": 6,
+}
+
+# === Память пользователей ===
 chat_history = {}
 
 # === Описания моделей Gemini ===
@@ -134,11 +144,10 @@ IMAGE_FORMATS = {
 }
 
 # === Планировщик задач (APScheduler) ===
-scheduler = BackgroundScheduler(timezone="Europe/Moscow")  # Укажи свой часовой пояс
+scheduler = BackgroundScheduler(timezone=TIMEZONE)
 
 # === Вспомогательные функции для работы с БД ===
 def get_db_user(chat_id):
-    """Возвращает объект пользователя из БД и сессию. Не забудь закрыть сессию!"""
     db = SessionLocal()
     user = db.query(User).filter(User.telegram_id == chat_id).first()
     if not user:
@@ -152,6 +161,7 @@ def get_db_user(chat_id):
 def get_main_keyboard():
     markup = ReplyKeyboardMarkup(row_width=2, resize_keyboard=True)
     btn_profile = KeyboardButton("👤 Профиль")
+    btn_tasks = KeyboardButton("📋 Задачи")
     btn_models = KeyboardButton("🧠 Модели")
     btn_settings = KeyboardButton("⚙️ Настройки")
     btn_image = KeyboardButton("🎨 Нарисовать")
@@ -160,7 +170,7 @@ def get_main_keyboard():
     btn_reset = KeyboardButton("🔄 Сбросить историю")
     btn_help = KeyboardButton("ℹ️ Помощь")
     btn_status = KeyboardButton("📊 Статус")
-    markup.add(btn_profile, btn_models, btn_settings, btn_image, btn_hf, btn_format, btn_reset, btn_help, btn_status)
+    markup.add(btn_profile, btn_tasks, btn_models, btn_settings, btn_image, btn_hf, btn_format, btn_reset, btn_help, btn_status)
     return markup
 
 # === История ===
@@ -200,7 +210,7 @@ def update_history(chat_id, role, content):
 def clear_history(chat_id):
     chat_history[chat_id] = []
 
-# === Форматирование Markdown -> HTML для Telegram ===
+# === Форматирование ===
 def format_plain_text(text):
     escaped = html.escape(text, quote=False)
     escaped = re.sub(r'`([^`\n]+)`', r'<code>\1</code>', escaped)
@@ -274,7 +284,7 @@ def send_long_message(chat_id, text, reply_to_message_id=None):
             else:
                 bot.send_message(chat_id, html_chunk, parse_mode='HTML')
         except Exception as e:
-            print(f"⚠️ HTML не прошёл, отправляю как plain: {e}", flush=True)
+            print(f"⚠️ HTML не прошёл: {e}", flush=True)
             if i == 0:
                 bot.send_message(chat_id, chunk, reply_to_message_id=reply_to_message_id)
             else:
@@ -282,7 +292,7 @@ def send_long_message(chat_id, text, reply_to_message_id=None):
         if i < len(chunks) - 1:
             time.sleep(0.5)
 
-# === ПЕРЕВОД ПРОМПТА через Gemini 3.5 Flash-Lite ===
+# === ПЕРЕВОД ПРОМПТА ===
 def translate_to_english(text):
     try:
         payload = {
@@ -310,7 +320,6 @@ def build_formats_keyboard(chat_id):
     user, db = get_db_user(chat_id)
     current = user.format
     db.close()
-
     markup = InlineKeyboardMarkup(row_width=1)
     for fmt_id, info in IMAGE_FORMATS.items():
         check = " ✅" if fmt_id == current else ""
@@ -326,22 +335,19 @@ def show_formats(message):
 def callback_set_format(call):
     chat_id = call.message.chat.id
     fmt_id = call.data.split(':', 1)[1]
-
     user, db = get_db_user(chat_id)
     user.format = fmt_id
     db.commit()
     db.close()
-
     info = IMAGE_FORMATS[fmt_id]
     bot.answer_callback_query(call.id, f"Формат: {info['name']}")
     bot.edit_message_text(chat_id=chat_id, message_id=call.message.message_id, text=f"✅ Формат: *{info['name']}*\n\n{info['desc']}", parse_mode="Markdown")
 
-# === МЕНЮ МОДЕЛЕЙ HUGGING FACE ===
+# === МЕНЮ МОДЕЛЕЙ HF ===
 def build_hf_models_keyboard(chat_id):
     user, db = get_db_user(chat_id)
     current = user.hf_model
     db.close()
-
     markup = InlineKeyboardMarkup(row_width=1)
     for model_id, info in HF_MODELS.items():
         check = " ✅" if model_id == current else ""
@@ -351,18 +357,16 @@ def build_hf_models_keyboard(chat_id):
 @bot.message_handler(commands=['image_models'])
 def show_hf_models(message):
     chat_id = message.chat.id
-    bot.send_message(chat_id, "🎨 *Выбери модель для генерации картинок:*\n\nВсе модели работают через Hugging Face — бесплатно, без водяных знаков.", reply_markup=build_hf_models_keyboard(chat_id), parse_mode="Markdown")
+    bot.send_message(chat_id, "🎨 *Выбери модель для генерации картинок:*", reply_markup=build_hf_models_keyboard(chat_id), parse_mode="Markdown")
 
 @bot.callback_query_handler(func=lambda call: call.data.startswith('set_hf_model:'))
 def callback_set_hf_model(call):
     chat_id = call.message.chat.id
     model_id = call.data.split(':', 1)[1]
-
     user, db = get_db_user(chat_id)
     user.hf_model = model_id
     db.commit()
     db.close()
-
     info = HF_MODELS[model_id]
     bot.answer_callback_query(call.id, f"Выбрана модель: {info['name']}")
     bot.edit_message_text(chat_id=chat_id, message_id=call.message.message_id, text=f"✅ Модель: *{info['name']}*\n\n{info['desc']}", parse_mode="Markdown")
@@ -372,7 +376,6 @@ def build_models_keyboard(chat_id):
     user, db = get_db_user(chat_id)
     current_model = user.model
     db.close()
-
     markup = InlineKeyboardMarkup(row_width=1)
     for model_id, info in MODEL_INFO.items():
         check = " ✅" if model_id == current_model else ""
@@ -382,7 +385,7 @@ def build_models_keyboard(chat_id):
 @bot.message_handler(commands=['models'])
 def show_models(message):
     chat_id = message.chat.id
-    bot.send_message(chat_id, "🧠 *Выбери модель:*\n\nНажми на модель, чтобы увидеть её описание.", reply_markup=build_models_keyboard(chat_id), parse_mode="Markdown")
+    bot.send_message(chat_id, "🧠 *Выбери модель:*", reply_markup=build_models_keyboard(chat_id), parse_mode="Markdown")
 
 @bot.callback_query_handler(func=lambda call: call.data.startswith('model:'))
 def callback_model_info(call):
@@ -395,20 +398,18 @@ def callback_model_info(call):
     markup = InlineKeyboardMarkup(row_width=1)
     markup.add(InlineKeyboardButton("✅ Выбрать эту модель", callback_data=f"confirm_model:{model_id}"))
     markup.add(InlineKeyboardButton("⬅️ Назад к списку", callback_data="back_to_models"))
-    bot.edit_message_text(chat_id=chat_id, message_id=call.message.message_id, text=f"*{info['name']}*\n\n{info['desc']}\n\nВыбрать эту модель?", reply_markup=markup, parse_mode="Markdown")
+    bot.edit_message_text(chat_id=chat_id, message_id=call.message.message_id, text=f"*{info['name']}*\n\n{info['desc']}\n\nВыбрать?", reply_markup=markup, parse_mode="Markdown")
     bot.answer_callback_query(call.id)
 
 @bot.callback_query_handler(func=lambda call: call.data.startswith('confirm_model:'))
 def callback_confirm_model(call):
     chat_id = call.message.chat.id
     model_id = call.data.split(':', 1)[1]
-
     user, db = get_db_user(chat_id)
     user.model = model_id
     db.commit()
     current_thinking = user.thinking
     db.close()
-
     markup = InlineKeyboardMarkup(row_width=1)
     for level_id, level_name in THINKING_LEVELS.items():
         check = " ✅" if level_id == current_thinking else ""
@@ -420,13 +421,11 @@ def callback_confirm_model(call):
 def callback_thinking(call):
     chat_id = call.message.chat.id
     level = call.data.split(':', 1)[1]
-
     user, db = get_db_user(chat_id)
     user.thinking = level
     model_id = user.model
     db.commit()
     db.close()
-
     bot.edit_message_text(chat_id=chat_id, message_id=call.message.message_id, text=f"✅ *Настройки сохранены!*\n\n🧠 Модель: {MODEL_INFO[model_id]['name']}\n⚙️ Режим: {THINKING_LEVELS[level]}", parse_mode="Markdown")
     bot.answer_callback_query(call.id, "Сохранено!")
 
@@ -450,13 +449,12 @@ def build_settings_keyboard(chat_id):
 @bot.message_handler(commands=['settings'])
 def show_settings(message):
     chat_id = message.chat.id
-    bot.send_message(chat_id, "⚙️ *Настройки контекста*\n\n📏 *Длина контекста* — сколько сообщений бот помнит.\n🎲 *Температура* — креативность (0.0 — строго, 1.5 — творчески).\n📝 *Макс. токенов* — длина ответа.", reply_markup=build_settings_keyboard(chat_id), parse_mode="Markdown")
+    bot.send_message(chat_id, "⚙️ *Настройки контекста*", reply_markup=build_settings_keyboard(chat_id), parse_mode="Markdown")
 
 @bot.callback_query_handler(func=lambda call: call.data.startswith('settings:'))
 def callback_settings(call):
     chat_id = call.message.chat.id
     action = call.data.split(':', 1)[1]
-
     user, db = get_db_user(chat_id)
 
     if action == "history":
@@ -535,18 +533,183 @@ def callback_set_tokens(call):
 def profile_command(message):
     chat_id = message.chat.id
     user, db = get_db_user(chat_id)
-
     xp_needed = int(100 * (1.5 ** user.level))
-
     text = (
         f"👤 **Профиль**\n\n"
         f"🏆 Уровень: {user.level}\n"
         f"✨ XP: {user.xp} / {xp_needed}\n"
         f"💰 Баланс: {user.balance:.2f}\n\n"
-        f"📊 Прогресс до следующего уровня: {user.xp}/{xp_needed}"
+        f"📊 Прогресс: {user.xp}/{xp_needed}"
     )
     bot.reply_to(message, text, parse_mode="Markdown")
     db.close()
+
+# === ЗАДАЧИ: список, выполнение, удаление ===
+def format_task_line(task, idx=None):
+    emoji = {"one_time": "🎯", "daily": "🔁", "weekly": "📅"}.get(task.task_type, "📌")
+    prefix = f"{idx}. " if idx else ""
+    streak = f" 🔥{task.streak}" if task.streak > 0 else ""
+    time_part = ""
+    if task.task_type == "one_time" and task.time_str:
+        try:
+            dt = datetime.strptime(task.time_str, "%Y-%m-%d %H:%M")
+            time_part = f" — {dt.strftime('%d.%m %H:%M')}"
+        except Exception:
+            time_part = f" — {task.time_str}"
+    elif task.time_str:
+        time_part = f" — {task.time_str}"
+        if task.task_type == "weekly" and task.days:
+            days_ru = ", ".join(WEEKDAYS_RU.get(WEEKDAYS_MAP.get(d.strip().lower(), -1), d) for d in task.days.split(","))
+            time_part = f" — {days_ru} {task.time_str}"
+    return f"{prefix}{emoji} {task.description}{time_part}{streak}"
+
+def build_tasks_keyboard(tasks):
+    markup = InlineKeyboardMarkup(row_width=2)
+    for task in tasks:
+        btn_done = InlineKeyboardButton(text=f"✅ {task.id}", callback_data=f"task_done:{task.id}")
+        btn_del = InlineKeyboardButton(text=f"🗑 {task.id}", callback_data=f"task_del:{task.id}")
+        markup.add(btn_done, btn_del)
+    return markup
+
+def get_active_tasks(user_db_id, db):
+    return db.query(Task).filter(Task.user_id == user_db_id, Task.is_active == True).order_by(Task.id).all()
+
+@bot.message_handler(commands=['tasks'])
+def tasks_command(message):
+    chat_id = message.chat.id
+    user, db = get_db_user(chat_id)
+    tasks = get_active_tasks(user.id, db)
+
+    if not tasks:
+        bot.reply_to(
+            message,
+            "📋 У тебя нет активных задач.\n\n"
+            "Просто напиши боту, например:\n"
+            "• «Завтра в 15:00 позвонить врачу» — разовая\n"
+            "• «Каждый день в 8:00 выпить воду» — ежедневная\n"
+            "• «Каждый Пн и Ср в 19:00 читать» — еженедельная",
+            reply_markup=get_main_keyboard()
+        )
+        db.close()
+        return
+
+    lines = ["📋 **Твои задачи:**\n"]
+    for i, t in enumerate(tasks, 1):
+        lines.append(format_task_line(t, i))
+    lines.append("\nНажми ✅ <id> чтобы выполнить, 🗑 <id> чтобы удалить.")
+
+    bot.reply_to(message, "\n".join(lines), parse_mode="Markdown", reply_markup=build_tasks_keyboard(tasks))
+    db.close()
+
+@bot.message_handler(commands=['tasks_add'])
+def tasks_add_help(message):
+    bot.reply_to(
+        message,
+        "Просто напиши боту естественным языком:\n"
+        "• «Завтра в 15:00 позвонить врачу» — разовая\n"
+        "• «Каждый день в 8:00 выпить воду» — ежедневная\n"
+        "• «Каждый Пн и Ср в 19:00 читать» — еженедельная"
+    )
+
+@bot.callback_query_handler(func=lambda call: call.data.startswith('task_done:'))
+def callback_task_done(call):
+    chat_id = call.message.chat.id
+    task_id = int(call.data.split(':', 1)[1])
+
+    user, db = get_db_user(chat_id)
+    task = db.query(Task).filter(Task.id == task_id, Task.user_id == user.id).first()
+    if not task:
+        bot.answer_callback_query(call.id, "Задача не найдена")
+        db.close()
+        return
+
+    task.last_completed = datetime.now()
+    if task.task_type in ("daily", "weekly"):
+        task.streak = (task.streak or 0) + 1
+        task.reminder_sent = None  # сброс на завтра
+        streak_msg = f" 🔥 Серия: {task.streak}"
+    else:
+        task.is_active = False  # разовая — выполнена
+        streak_msg = ""
+
+    db.commit()
+
+    bot.answer_callback_query(call.id, "Выполнено! ✅")
+
+    # Обновляем список задач
+    remaining = get_active_tasks(user.id, db)
+    if remaining:
+        lines = ["📋 **Твои задачи:**\n"]
+        for i, t in enumerate(remaining, 1):
+            lines.append(format_task_line(t, i))
+        bot.edit_message_text(
+            chat_id=chat_id,
+            message_id=call.message.message_id,
+            text="\n".join(lines),
+            parse_mode="Markdown",
+            reply_markup=build_tasks_keyboard(remaining)
+        )
+    else:
+        bot.edit_message_text(
+            chat_id=chat_id,
+            message_id=call.message.message_id,
+            text="🎉 Все задачи выполнены!"
+        )
+
+    # Уведомление
+    bot.send_message(chat_id, f"✅ Выполнено: {task.description}{streak_msg}")
+
+    # XP за выполнение
+    xp_for_task = 10 if task.task_type == "one_time" else 5
+    user.xp += xp_for_task
+    xp_needed = int(100 * (1.5 ** user.level))
+    while user.xp >= xp_needed:
+        user.xp -= xp_needed
+        user.level += 1
+        xp_needed = int(100 * (1.5 ** user.level))
+        bot.send_message(chat_id, f"🎉 Уровень повышен! Теперь ты Level {user.level}!")
+    db.commit()
+    db.close()
+
+@bot.callback_query_handler(func=lambda call: call.data.startswith('task_del:'))
+def callback_task_del(call):
+    chat_id = call.message.chat.id
+    task_id = int(call.data.split(':', 1)[1])
+
+    user, db = get_db_user(chat_id)
+    task = db.query(Task).filter(Task.id == task_id, Task.user_id == user.id).first()
+    if not task:
+        bot.answer_callback_query(call.id, "Задача не найдена")
+        db.close()
+        return
+
+    task.is_active = False
+    db.commit()
+    bot.answer_callback_query(call.id, "Удалено 🗑")
+
+    remaining = get_active_tasks(user.id, db)
+    if remaining:
+        lines = ["📋 **Твои задачи:**\n"]
+        for i, t in enumerate(remaining, 1):
+            lines.append(format_task_line(t, i))
+        bot.edit_message_text(
+            chat_id=chat_id,
+            message_id=call.message.message_id,
+            text="\n".join(lines),
+            parse_mode="Markdown",
+            reply_markup=build_tasks_keyboard(remaining)
+        )
+    else:
+        bot.edit_message_text(
+            chat_id=chat_id,
+            message_id=call.message.message_id,
+            text="📋 Список пуст."
+        )
+    db.close()
+
+@bot.message_handler(func=lambda m: m.text == "📋 Задачи")
+def tasks_button(message):
+    tasks_command(message)
 
 # === КОМАНДЫ ===
 @bot.message_handler(commands=['start', 'reset'])
@@ -554,19 +717,17 @@ def send_welcome(message):
     chat_id = message.chat.id
     clear_history(chat_id)
     user, db = get_db_user(chat_id)
-
     model_name = MODEL_INFO[user.model]["name"]
     hf_model_name = HF_MODELS[user.hf_model]["name"]
     format_name = IMAGE_FORMATS[user.format]["name"]
     db.close()
-
     bot.send_message(chat_id,
                      f"Привет! Я бот на нейросети Gemini.\n"
                      f"🧠 Модель: {model_name}\n"
                      f"🎨 Модель картинок: {hf_model_name}\n"
                      f"📐 Формат: {format_name}\n"
-                     f"Умею: текст, фото, голосовые и генерацию картинок.\n"
-                     f"Используй кнопки внизу или /models, /settings, /image_models, /format, /image, /profile",
+                     f"Умею: текст, фото, голосовые, картинки и напоминания.\n"
+                     f"Команды: /models, /settings, /image_models, /format, /image, /profile, /tasks",
                      reply_markup=get_main_keyboard())
 
 @bot.message_handler(commands=['help'])
@@ -578,13 +739,17 @@ def help_command(message):
         "• Отправь голосовое – расшифрую и отвечу.\n"
         "• 🎨 Нарисовать или /image <описание> – генерация картинок.\n"
         "• 🎨 Модель картинок или /image_models – выбрать модель генерации.\n"
-        "• 📐 Формат или /format – выбрать формат (квадрат/широкий/вертикальный).\n"
+        "• 📐 Формат или /format – выбрать формат.\n"
         "• 🧠 Модели – выбрать модель Gemini.\n"
         "• ⚙️ Настройки – контекст, температура, токены.\n"
-        "• 👤 Профиль – посмотреть свой уровень и баланс.\n"
-        "• 🔄 Сбросить историю – очистить память.\n"
-        "• 📊 Статус – текущие настройки.\n"
-        "• Команды: /start, /reset, /help, /stats, /models, /settings, /test, /image, /image_models, /format, /profile"
+        "• 👤 Профиль – уровень, XP, баланс.\n"
+        "• 📋 Задачи или /tasks – список задач с кнопками.\n"
+        "• 🔄 Сбросить историю – очистить память.\n\n"
+        "📝 Как ставить задачи:\n"
+        "• «Завтра в 15:00 позвонить врачу»\n"
+        "• «Каждый день в 8:00 выпить воду»\n"
+        "• «Каждый Пн и Ср в 19:00 читать»\n"
+        "Напомню за 5 минут до времени."
     )
     bot.reply_to(message, help_text, reply_markup=get_main_keyboard())
 
@@ -594,10 +759,9 @@ def stats_command(message):
     history = get_history(chat_id)
     total_chars = sum(len(str(msg["content"])) for msg in history)
     user, db = get_db_user(chat_id)
-
     bot.reply_to(message,
                  f"📊 *Текущий статус:*\n\n"
-                 f"🧠 Модель Gemini: {MODEL_INFO[user.model]['name']}\n"
+                 f"🧠 Модель: {MODEL_INFO[user.model]['name']}\n"
                  f"⚙️ Режим: {THINKING_LEVELS[user.thinking]}\n"
                  f"📏 Контекст: {user.history_len}\n"
                  f"🎲 Температура: {user.temperature}\n"
@@ -605,7 +769,7 @@ def stats_command(message):
                  f"🎨 Модель картинок: {HF_MODELS[user.hf_model]['name']}\n"
                  f"📐 Формат: {IMAGE_FORMATS[user.format]['name']}\n\n"
                  f"Сообщений в истории: {len(history)}\n"
-                 f"Размер: {total_chars} символов (~{total_chars//4} токенов)",
+                 f"Размер: {total_chars} символов",
                  reply_markup=get_main_keyboard(), parse_mode="Markdown")
     db.close()
 
@@ -623,7 +787,7 @@ def settings_button(message):
 
 @bot.message_handler(func=lambda m: m.text == "🎨 Нарисовать")
 def image_button(message):
-    bot.reply_to(message, "🎨 Напиши, что нарисовать, командой:\n`/image кот в космосе`\n\nПромпт можно на русском — я переведу на английский автоматически.", parse_mode="Markdown")
+    bot.reply_to(message, "🎨 Напиши, что нарисовать, командой:\n`/image кот в космосе`", parse_mode="Markdown")
 
 @bot.message_handler(func=lambda m: m.text == "🎨 Модель картинок")
 def hf_models_button(message):
@@ -646,18 +810,18 @@ def help_button(message):
 def status_button(message):
     stats_command(message)
 
-# === ГЕНЕРАЦИЯ КАРТИНОК (Hugging Face) ===
+# === ГЕНЕРАЦИЯ КАРТИНОК ===
 @bot.message_handler(commands=['image'])
 def generate_image(message):
     chat_id = message.chat.id
     prompt = message.text.replace('/image', '', 1).strip()
 
     if not prompt:
-        bot.reply_to(message, "🖼 Напиши, что нарисовать: `/image кот в космосе`", parse_mode="Markdown")
+        bot.reply_to(message, "🖼 Напиши: `/image кот в космосе`", parse_mode="Markdown")
         return
 
     if not hf_client:
-        bot.reply_to(message, "❌ Не задан токен Hugging Face. Добавь переменную `HF_TOKEN` на Render.", parse_mode="Markdown")
+        bot.reply_to(message, "❌ Не задан `HF_TOKEN` на Render.", parse_mode="Markdown")
         return
 
     user, db = get_db_user(chat_id)
@@ -666,10 +830,8 @@ def generate_image(message):
     db.close()
 
     bot.send_message(chat_id, f"🎨 Генерирую через Hugging Face ({model_info['name']})...\nЭто может занять 15-30 секунд.")
-
     english_prompt = translate_to_english(prompt)
-    print(f"🎨 Итоговый промпт: {english_prompt}", flush=True)
-    print(f"📐 Формат: {fmt['width']}×{fmt['height']}", flush=True)
+    print(f"🎨 Промпт: {english_prompt}", flush=True)
 
     try:
         image = hf_client.text_to_image(english_prompt, model=model_info["id"], width=fmt['width'], height=fmt['height'])
@@ -679,19 +841,17 @@ def generate_image(message):
         bot.send_photo(chat_id, buff, reply_to_message_id=message.message_id)
     except Exception as e:
         error_str = str(e)
-        print(f"Ошибка Hugging Face: {error_str}", flush=True)
+        print(f"Ошибка HF: {error_str}", flush=True)
         if "503" in error_str:
-            bot.reply_to(message, "⏳ Модель загружается на сервере. Попробуй ещё раз через 20-30 секунд.", reply_markup=get_main_keyboard())
+            bot.reply_to(message, "⏳ Модель загружается. Попробуй ещё раз через 20-30 сек.", reply_markup=get_main_keyboard())
         elif "429" in error_str:
-            bot.reply_to(message, "⏳ Слишком много запросов. Подожди минуту и попробуй снова.", reply_markup=get_main_keyboard())
+            bot.reply_to(message, "⏳ Слишком много запросов. Подожди минуту.", reply_markup=get_main_keyboard())
         elif "402" in error_str or "Payment Required" in error_str:
-            bot.reply_to(message, "💳 Лимиты на этой модели закончились. Попробуй другую в меню 🎨 Модель картинок.", reply_markup=get_main_keyboard())
-        elif "width" in error_str.lower() or "height" in error_str.lower():
-            bot.reply_to(message, "⚠️ Эта модель не поддерживает выбранный формат. Попробуй квадрат или другую модель.", reply_markup=get_main_keyboard())
+            bot.reply_to(message, "💳 Лимиты закончились. Выбери другую модель в 🎨 Модель картинок.", reply_markup=get_main_keyboard())
         else:
-            bot.reply_to(message, f"❌ Ошибка Hugging Face: {error_str[:200]}", reply_markup=get_main_keyboard())
+            bot.reply_to(message, f"❌ Ошибка: {error_str[:200]}", reply_markup=get_main_keyboard())
 
-# === ОБРАБОТКА ТЕКСТА (С RPG-ЛОГИКОЙ) ===
+# === ОБРАБОТКА ТЕКСТА ===
 @bot.message_handler(content_types=['text'])
 def reply_text(message):
     user_text = message.text
@@ -704,23 +864,34 @@ def reply_text(message):
 
     user, db = get_db_user(chat_id)
 
-    # Простой промпт — бот отвечает как обычная нейросеть
+    # Текущая дата и время для контекста
+    now = datetime.now()
+    today_str = now.strftime("%Y-%m-%d")
+    weekday_str = WEEKDAYS_RU[now.weekday()]
+    time_str = now.strftime("%H:%M")
+
     system_prompt = (
-        "Ты — полезный ассистент. Отвечай на вопросы пользователя кратко и по делу, "
-        "как обычная нейросеть в чате.\n\n"
-        "Дополнительно ты ведёшь учёт активности. Проанализируй сообщение и реши:\n"
+        "Ты — полезный ассистент. Отвечай на вопросы пользователя кратко и по делу.\n\n"
+        f"Сегодня: {today_str} ({weekday_str}), сейчас {time_str}.\n\n"
+        "Дополнительно веди учёт активности:\n"
         "- Если пользователь сделал что-то полезное — поставь xp (5-100).\n"
-        "- Если упомянул трату или доход — поставь money (число, минус для трат) и category.\n"
-        "- Если просит напоминание — заполни task.\n"
-        "- Если это просто вопрос или разговор — xp=0, money=0, task=null.\n\n"
-        "Формат ответа — строго JSON (без markdown, без ```):\n"
+        "- Если упомянул трату или доход — поставь money (минус для трат) и category.\n"
+        "- Если просит напоминание — заполни task. Типы:\n"
+        "  • one_time (разовая): нужны description, date (YYYY-MM-DD), time (HH:MM). Пример: завтра в 15:00 → date=завтра, time=15:00.\n"
+        "  • daily (ежедневная): нужны description, time (HH:MM).\n"
+        "  • weekly (еженедельная): нужны description, time (HH:MM), days (Mon,Wed или Пн,Ср).\n"
+        "- Если это просто вопрос — xp=0, money=0, task=null.\n\n"
+        "Отвечай СТРОГО одним JSON-ОБЪЕКТОМ (без markdown, без ```):\n"
         "{\n"
         "  \"reply\": \"ответ пользователю\",\n"
         "  \"xp\": 0,\n"
         "  \"money\": 0,\n"
         "  \"category\": \"\",\n"
         "  \"task\": null\n"
-        "}"
+        "}\n\n"
+        "Если есть задача, то task выглядит так:\n"
+        "{\"description\": \"...\", \"type\": \"one_time|daily|weekly\", \"date\": \"YYYY-MM-DD\", \"time\": \"HH:MM\", \"days\": \"Mon,Wed\"}\n"
+        "Поле date — только для one_time. Поле days — только для weekly."
     )
 
     clean_history = [m for m in get_history(chat_id) if m["role"] != "system"]
@@ -741,7 +912,7 @@ def reply_text(message):
                 raise ValueError(f"Нет choices: {str(data)[:300]}")
 
             raw_reply = data['choices'][0]['message']['content'].strip()
-            print(f"🤖 RAW ответ Gemini: {raw_reply[:600]}", flush=True)
+            print(f"🤖 RAW: {raw_reply[:600]}", flush=True)
 
             cleaned = re.sub(r'^```(?:json)?\s*', '', raw_reply)
             cleaned = re.sub(r'\s*```$', '', cleaned)
@@ -758,17 +929,14 @@ def reply_text(message):
                         pass
 
             if parsed is None:
-                print(f"⚠️ JSON не распарсился, отправляю как plain", flush=True)
                 send_long_message(chat_id, raw_reply, message.message_id)
                 update_history(chat_id, "assistant", raw_reply)
                 break
 
             if isinstance(parsed, list):
-                print(f"⚠️ Gemini вернул list, беру первый элемент", flush=True)
                 parsed = parsed[0] if parsed else {}
 
             if not isinstance(parsed, dict):
-                print(f"⚠️ JSON не dict: {type(parsed)}. Отправляю raw.", flush=True)
                 send_long_message(chat_id, raw_reply, message.message_id)
                 update_history(chat_id, "assistant", raw_reply)
                 break
@@ -780,7 +948,6 @@ def reply_text(message):
                 or parsed.get("text")
                 or parsed.get("content")
             )
-
             if not reply_text:
                 for k, v in parsed.items():
                     if isinstance(v, str) and v.strip():
@@ -802,7 +969,7 @@ def reply_text(message):
             category = parsed.get("category") or "Разное"
             task_data = parsed.get("task")
 
-            # 1. XP и уровень
+            # XP
             if xp_gain > 0:
                 user.xp += xp_gain
                 xp_needed = int(100 * (1.5 ** user.level))
@@ -810,10 +977,10 @@ def reply_text(message):
                     user.xp -= xp_needed
                     user.level += 1
                     xp_needed = int(100 * (1.5 ** user.level))
-                    reply_text += f"\n\n🎉 Уровень повышен! Теперь ты Level {user.level}!"
+                    reply_text += f"\n\n🎉 Уровень повышен! Теперь Level {user.level}!"
                 reply_text += f"\n\n✨ +{xp_gain} XP"
 
-            # 2. Баланс
+            # Баланс
             if money_change != 0:
                 user.balance += money_change
                 db.add(Transaction(
@@ -825,17 +992,51 @@ def reply_text(message):
                 sign = "+" if money_change > 0 else ""
                 reply_text += f"\n💰 Баланс: {sign}{money_change} ({category}). Текущий: {user.balance:.2f}"
 
-            # 3. Задача
+            # Задача
             if task_data and isinstance(task_data, dict):
-                new_task = Task(
-                    user_id=user.id,
-                    description=task_data.get('description', 'Без названия'),
-                    task_type=task_data.get('type', 'one_time'),
-                    time_str=task_data.get('time'),
-                    days=task_data.get('days')
-                )
-                db.add(new_task)
-                reply_text += f"\n\n📝 Задача добавлена: {task_data.get('description')} в {task_data.get('time')}"
+                try:
+                    t_type = task_data.get("type", "one_time")
+                    t_time = task_data.get("time")
+                    t_days = task_data.get("days")
+                    t_desc = task_data.get("description", "Без названия")
+
+                    stored_time = t_time
+                    if t_type == "one_time":
+                        t_date = task_data.get("date")
+                        if t_date and t_time:
+                            stored_time = f"{t_date} {t_time}"
+                        elif t_time:
+                            # если дата не пришла — считаем, что сегодня
+                            stored_time = f"{datetime.now().strftime('%Y-%m-%d')} {t_time}"
+
+                    # Нормализуем дни недели
+                    if t_type == "weekly" and t_days:
+                        days_list = []
+                        for d in str(t_days).split(","):
+                            d_clean = d.strip().lower()
+                            if d_clean in WEEKDAYS_MAP:
+                                days_list.append(["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"][WEEKDAYS_MAP[d_clean]])
+                            else:
+                                days_list.append(d.strip())
+                        t_days = ",".join(days_list)
+
+                    new_task = Task(
+                        user_id=user.id,
+                        description=t_desc,
+                        task_type=t_type,
+                        time_str=stored_time,
+                        days=t_days,
+                    )
+                    db.add(new_task)
+
+                    if t_type == "one_time":
+                        reply_text += f"\n\n📝 Разовая задача: {t_desc} — {stored_time}"
+                    elif t_type == "daily":
+                        reply_text += f"\n\n🔁 Ежедневно: {t_desc} в {t_time}"
+                    elif t_type == "weekly":
+                        reply_text += f"\n\n📅 По {t_days}: {t_desc} в {t_time}"
+                except Exception as e:
+                    print(f"Ошибка создания задачи: {e}", flush=True)
 
             db.commit()
             send_long_message(chat_id, reply_text, message.message_id)
@@ -850,7 +1051,7 @@ def reply_text(message):
                 time.sleep(2 * (attempt + 1))
     db.close()
 
-# === ОБРАБОТКА ФОТО ===
+# === ФОТО ===
 @bot.message_handler(content_types=['photo'])
 def reply_photo(message):
     chat_id = message.chat.id
@@ -867,19 +1068,16 @@ def reply_photo(message):
             file_id = message.photo[-1].file_id
             file_info = bot.get_file(file_id)
             downloaded_file = bot.download_file(file_info.file_path)
-
             image = Image.open(BytesIO(downloaded_file))
             buff = BytesIO()
             image.save(buff, format="JPEG")
             base64_image = base64.b64encode(buff.getvalue()).decode('utf-8')
 
-            user_text = "Что изображено на этом фото? Опиши подробно на русском."
-
             payload = {
                 "model": model,
                 "messages": [
                     {"role": "user", "content": [
-                        {"type": "text", "text": user_text},
+                        {"type": "text", "text": "Что изображено на этом фото? Опиши подробно на русском."},
                         {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{base64_image}"}}
                     ]}
                 ],
@@ -888,22 +1086,20 @@ def reply_photo(message):
             }
             response = requests.post(AI_URL, json=payload, headers=HEADERS, timeout=TIMEOUT)
             data = response.json()
-
             if 'choices' not in data or not data['choices']:
                 raise ValueError(f"Нет choices: {str(data)[:300]}")
-
             reply = data['choices'][0]['message']['content'].strip()
             send_long_message(chat_id, reply, message.message_id)
             update_history(chat_id, "assistant", reply)
             break
         except Exception as e:
-            print(f"Ошибка при фото (попытка {attempt + 1}): {e}", flush=True)
+            print(f"Ошибка при фото: {e}", flush=True)
             if attempt == 2:
                 bot.reply_to(message, "❌ Не удалось обработать фото.", reply_markup=get_main_keyboard())
             else:
                 time.sleep(2 * (attempt + 1))
 
-# === ОБРАБОТКА ГОЛОСОВЫХ ===
+# === ГОЛОСОВЫЕ ===
 @bot.message_handler(content_types=['voice'])
 def reply_voice(message):
     chat_id = message.chat.id
@@ -918,7 +1114,6 @@ def reply_voice(message):
     try:
         file_info = bot.get_file(message.voice.file_id)
         downloaded_file = bot.download_file(file_info.file_path)
-
         audio = AudioSegment.from_file(BytesIO(downloaded_file), format="ogg")
         wav_buffer = BytesIO()
         audio.export(wav_buffer, format="wav")
@@ -937,26 +1132,113 @@ def reply_voice(message):
         }
         response = requests.post(AI_URL, json=payload, headers=HEADERS, timeout=TIMEOUT)
         data = response.json()
-
         if 'choices' not in data or not data['choices']:
             raise ValueError(f"Нет choices: {str(data)[:300]}")
-
         reply = data['choices'][0]['message']['content'].strip()
         send_long_message(chat_id, reply, message.message_id)
         update_history(chat_id, "assistant", reply)
-
     except Exception as e:
         print(f"Ошибка при голосовом: {e}", flush=True)
         bot.reply_to(message, "❌ Не удалось обработать голосовое.", reply_markup=get_main_keyboard())
 
-# === ФОНОВАЯ ПРОВЕРКА ЗАДАЧ (APScheduler) ===
+# === ФОНОВАЯ ПРОВЕРКА ЗАДАЧ ===
+def send_task_reminder(task, user):
+    try:
+        bot.send_message(
+            user.telegram_id,
+            f"⏰ *Напоминание через 5 минут:*\n{task.description}",
+            parse_mode="Markdown"
+        )
+    except Exception as e:
+        print(f"Ошибка отправки напоминания: {e}", flush=True)
+
 def check_tasks():
-    """Запускается каждую минуту. Пока заглушка — реальную логику напоминаний добавим позже."""
+    """Проверяет активные задачи каждую минуту и отправляет напоминания за 5 мин до времени."""
     db = SessionLocal()
     try:
+        now = datetime.now()
+        now_min = now.replace(second=0, microsecond=0)
+        today_str = now.strftime("%Y-%m-%d")
+        current_weekday = now.weekday()
+
         tasks = db.query(Task).filter(Task.is_active == True).all()
+
         for task in tasks:
-            pass
+            try:
+                user = db.query(User).filter(User.id == task.user_id).first()
+                if not user:
+                    continue
+
+                reminder_dt = None
+
+                if task.task_type == "one_time":
+                    if not task.time_str:
+                        continue
+                    try:
+                        scheduled = datetime.strptime(task.time_str, "%Y-%m-%d %H:%M")
+                    except ValueError:
+                        continue
+                    reminder_dt = scheduled - timedelta(minutes=5)
+                    # Если время напоминания прошло и задача не была отправлена сегодня
+                    if reminder_dt < now_min:
+                        # пропускаем, если опоздали больше чем на 2 минуты
+                        if (now_min - reminder_dt).total_seconds() > 120:
+                            # деактивируем просроченную разовую задачу
+                            if scheduled < now - timedelta(hours=1):
+                                task.is_active = False
+                            continue
+
+                elif task.task_type == "daily":
+                    if not task.time_str:
+                        continue
+                    try:
+                        t_time = datetime.strptime(task.time_str, "%H:%M").time()
+                    except ValueError:
+                        continue
+                    scheduled = datetime.combine(now.date(), t_time)
+                    reminder_dt = scheduled - timedelta(minutes=5)
+
+                elif task.task_type == "weekly":
+                    if not task.time_str or not task.days:
+                        continue
+                    # проверить, что сегодня нужный день
+                    task_days = []
+                    for d in task.days.split(","):
+                        d_clean = d.strip().lower()
+                        if d_clean in WEEKDAYS_MAP:
+                            task_days.append(WEEKDAYS_MAP[d_clean])
+                    if current_weekday not in task_days:
+                        continue
+                    try:
+                        t_time = datetime.strptime(task.time_str, "%H:%M").time()
+                    except ValueError:
+                        continue
+                    scheduled = datetime.combine(now.date(), t_time)
+                    reminder_dt = scheduled - timedelta(minutes=5)
+
+                if reminder_dt is None:
+                    continue
+
+                # Совпадает ли текущая минута со временем напоминания?
+                if reminder_dt.replace(second=0, microsecond=0) == now_min:
+                    # Проверяем, не отправляли ли уже
+                    marker = reminder_dt.strftime("%Y-%m-%d %H:%M")
+                    if task.reminder_sent == marker:
+                        continue
+                    send_task_reminder(task, user)
+                    task.reminder_sent = marker
+
+                    # Сбрасываем streak, если пропущена предыдущая серия
+                    if task.task_type in ("daily", "weekly") and task.last_completed:
+                        days_since = (now.date() - task.last_completed.date()).days
+                        if task.task_type == "daily" and days_since > 1:
+                            task.streak = 0
+                        elif task.task_type == "weekly" and days_since > 7:
+                            task.streak = 0
+            except Exception as e:
+                print(f"Ошибка обработки задачи {task.id}: {e}", flush=True)
+
+        db.commit()
     except Exception as e:
         print(f"Ошибка планировщика: {e}", flush=True)
     finally:
