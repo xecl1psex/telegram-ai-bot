@@ -21,8 +21,9 @@ from huggingface_hub import InferenceClient
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 from apscheduler.schedulers.background import BackgroundScheduler
+from sqlalchemy import func
 
-from database import SessionLocal, User, Task, Transaction
+from database import SessionLocal, User, Task, Transaction, Achievement, XPLog
 
 load_dotenv()
 
@@ -79,7 +80,6 @@ TIMEZONE = "Europe/Moscow"
 TZ = ZoneInfo(TIMEZONE)
 
 def now_local():
-    """Текущее время в Москве без tzinfo (naive). Использовать везде вместо datetime.now()."""
     return datetime.now(TZ).replace(tzinfo=None)
 
 WEEKDAYS_RU = {0: "Пн", 1: "Вт", 2: "Ср", 3: "Чт", 4: "Пт", 5: "Сб", 6: "Вс"}
@@ -113,8 +113,32 @@ IMAGE_FORMATS = {
     "portrait": {"name": "📱 Вертикальный (9:16)", "desc": "768×1344.", "width": 768, "height": 1344},
 }
 
+# === ДОСТИЖЕНИЯ ===
+ACHIEVEMENTS = {
+    "first_task": {"name": "🎯 Первый шаг", "desc": "Выполнил первую задачу"},
+    "tasks_10": {"name": "💪 Трудяга", "desc": "Выполнил 10 задач"},
+    "tasks_50": {"name": "🔥 Машина", "desc": "Выполнил 50 задач"},
+    "streak_3": {"name": "🥉 Три дня подряд", "desc": "Streak 3 дня"},
+    "streak_7": {"name": "🥈 Неделя силы", "desc": "Streak 7 дней подряд"},
+    "streak_30": {"name": "🥇 Месяц дисциплины", "desc": "Streak 30 дней подряд"},
+    "level_5": {"name": "⭐ Опытный", "desc": "Достиг уровня 5"},
+    "level_10": {"name": "🌟 Ветеран", "desc": "Достиг уровня 10"},
+    "first_income": {"name": "💵 Первый доход", "desc": "Записал первый доход"},
+    "first_expense": {"name": "🛒 Первая трата", "desc": "Записал первую трату"},
+    "positive_balance": {"name": "🏦 В плюсе", "desc": "Баланс больше 1000"},
+    "week_warrior": {"name": "⚔️ Неделя воина", "desc": "10 задач за неделю"},
+}
+
+# Бонусы за streak (выдаются один раз через achievement)
+STREAK_BONUSES = {
+    "streak_3": 20,
+    "streak_7": 50,
+    "streak_30": 300,
+}
+
 scheduler = BackgroundScheduler(timezone=TIMEZONE)
 
+# === Помощники ===
 def hf_model_info(model_id):
     return HF_MODELS.get(model_id) or HF_MODELS[DEFAULT_HF_MODEL]
 
@@ -134,10 +158,111 @@ def get_db_user(chat_id):
         db.refresh(user)
     return user, db
 
+# === XP и достижения ===
+def add_xp(user, amount, source, db):
+    """Добавляет XP, логирует, повышает уровень. Возвращает сообщение о level up или None."""
+    if amount <= 0:
+        return None
+    user.xp += amount
+    db.add(XPLog(user_id=user.id, amount=amount, source=source))
+    level_up_msg = None
+    xp_needed = int(100 * (1.5 ** user.level))
+    while user.xp >= xp_needed:
+        user.xp -= xp_needed
+        user.level += 1
+        xp_needed = int(100 * (1.5 ** user.level))
+        level_up_msg = f"🎉 Уровень повышен! Теперь Level {user.level}!"
+    return level_up_msg
+
+def unlock_achievement(user, code, db):
+    """Разблокирует достижение. Возвращает True если новое, иначе False."""
+    existing = db.query(Achievement).filter(
+        Achievement.user_id == user.id,
+        Achievement.code == code
+    ).first()
+    if existing:
+        return False
+    ach = Achievement(user_id=user.id, code=code, unlocked_at=now_local())
+    db.add(ach)
+    return True
+
+def check_task_achievements(user, db):
+    """Проверяет достижения, связанные с задачами. Возвращает список новых кодов."""
+    new_achievements = []
+
+    # Количество выполненных задач
+    completed_count = db.query(Task).filter(
+        Task.user_id == user.id,
+        Task.last_completed.isnot(None)
+    ).count()
+
+    if completed_count >= 1 and unlock_achievement(user, "first_task", db):
+        new_achievements.append("first_task")
+    if completed_count >= 10 and unlock_achievement(user, "tasks_10", db):
+        new_achievements.append("tasks_10")
+    if completed_count >= 50 and unlock_achievement(user, "tasks_50", db):
+        new_achievements.append("tasks_50")
+
+    # Уровни
+    if user.level >= 5 and unlock_achievement(user, "level_5", db):
+        new_achievements.append("level_5")
+    if user.level >= 10 and unlock_achievement(user, "level_10", db):
+        new_achievements.append("level_10")
+
+    # Максимальный streak среди всех задач
+    max_streak = db.query(func.max(Task.streak)).filter(Task.user_id == user.id).scalar() or 0
+    if max_streak >= 3 and unlock_achievement(user, "streak_3", db):
+        new_achievements.append("streak_3")
+    if max_streak >= 7 and unlock_achievement(user, "streak_7", db):
+        new_achievements.append("streak_7")
+    if max_streak >= 30 and unlock_achievement(user, "streak_30", db):
+        new_achievements.append("streak_30")
+
+    # Задач за неделю
+    week_ago = now_local() - timedelta(days=7)
+    week_count = db.query(Task).filter(
+        Task.user_id == user.id,
+        Task.last_completed >= week_ago
+    ).count()
+    if week_count >= 10 and unlock_achievement(user, "week_warrior", db):
+        new_achievements.append("week_warrior")
+
+    return new_achievements
+
+def check_money_achievements(user, money_change, db):
+    """Проверяет достижения по деньгам. Возвращает список новых кодов."""
+    new_achievements = []
+
+    if money_change > 0 and unlock_achievement(user, "first_income", db):
+        new_achievements.append("first_income")
+    if money_change < 0 and unlock_achievement(user, "first_expense", db):
+        new_achievements.append("first_expense")
+    if user.balance >= 1000 and unlock_achievement(user, "positive_balance", db):
+        new_achievements.append("positive_balance")
+
+    return new_achievements
+
+def format_achievements_msg(codes, user):
+    """Формирует сообщение о новых достижениях + бонусах за streak."""
+    if not codes:
+        return ""
+    lines = ["\n\n🏆 **Новые достижения:**"]
+    bonus_xp = 0
+    for code in codes:
+        info = ACHIEVEMENTS.get(code, {})
+        lines.append(f"• {info.get('name', code)} — {info.get('desc', '')}")
+        if code in STREAK_BONUSES:
+            bonus_xp += STREAK_BONUSES[code]
+    if bonus_xp > 0:
+        lines.append(f"\n🎁 Бонус за streak: +{bonus_xp} XP")
+    return "\n".join(lines), bonus_xp
+
+# === Клавиатура ===
 def get_main_keyboard():
     markup = ReplyKeyboardMarkup(row_width=2, resize_keyboard=True)
     markup.add(
         KeyboardButton("👤 Профиль"), KeyboardButton("📋 Задачи"),
+        KeyboardButton("🏆 Достижения"), KeyboardButton("📊 Неделя"),
         KeyboardButton("🧠 Модели"), KeyboardButton("⚙️ Настройки"),
         KeyboardButton("🎨 Нарисовать"), KeyboardButton("🎨 Модель картинок"),
         KeyboardButton("📐 Формат"), KeyboardButton("🔄 Сбросить историю"),
@@ -145,6 +270,7 @@ def get_main_keyboard():
     )
     return markup
 
+# === История ===
 def get_history(chat_id):
     if chat_id not in chat_history:
         chat_history[chat_id] = []
@@ -173,6 +299,7 @@ def update_history(chat_id, role, content):
 def clear_history(chat_id):
     chat_history[chat_id] = []
 
+# === Форматирование ===
 def format_plain_text(text):
     escaped = html.escape(text, quote=False)
     return re.sub(r'`([^`\n]+)`', r'<code>\1</code>', escaped)
@@ -489,15 +616,105 @@ def profile_command(message):
     chat_id = message.chat.id
     user, db = get_db_user(chat_id)
     xp_needed = int(100 * (1.5 ** user.level))
+    ach_count = db.query(Achievement).filter(Achievement.user_id == user.id).count()
     text = (
         f"👤 **Профиль**\n\n"
         f"🏆 Уровень: {user.level}\n"
         f"✨ XP: {user.xp} / {xp_needed}\n"
-        f"💰 Баланс: {user.balance:.2f}\n\n"
+        f"💰 Баланс: {user.balance:.2f}\n"
+        f"🏅 Достижений: {ach_count}/{len(ACHIEVEMENTS)}\n\n"
         f"📊 Прогресс: {user.xp}/{xp_needed}"
     )
     bot.reply_to(message, text, parse_mode="Markdown")
     db.close()
+
+# === ДОСТИЖЕНИЯ ===
+@bot.message_handler(commands=['achievements'])
+def achievements_command(message):
+    chat_id = message.chat.id
+    user, db = get_db_user(chat_id)
+
+    unlocked = {a.code for a in db.query(Achievement).filter(Achievement.user_id == user.id).all()}
+
+    lines = [f"🏆 **Достижения** ({len(unlocked)}/{len(ACHIEVEMENTS)})\n"]
+    for code, info in ACHIEVEMENTS.items():
+        if code in unlocked:
+            lines.append(f"✅ {info['name']} — {info['desc']}")
+        else:
+            lines.append(f"🔒 {info['name']} — {info['desc']}")
+
+    bot.reply_to(message, "\n".join(lines), parse_mode="Markdown", reply_markup=get_main_keyboard())
+    db.close()
+
+@bot.message_handler(func=lambda m: m.text == "🏆 Достижения")
+def achievements_button(message):
+    achievements_command(message)
+
+# === НЕДЕЛЬНАЯ СТАТИСТИКА ===
+@bot.message_handler(commands=['week'])
+def week_command(message):
+    chat_id = message.chat.id
+    user, db = get_db_user(chat_id)
+    week_ago = now_local() - timedelta(days=7)
+
+    xp_total = db.query(func.sum(XPLog.amount)).filter(
+        XPLog.user_id == user.id,
+        XPLog.date >= week_ago
+    ).scalar() or 0
+
+    tasks_done = db.query(Task).filter(
+        Task.user_id == user.id,
+        Task.last_completed >= week_ago
+    ).count()
+
+    money_in = db.query(func.sum(Transaction.amount)).filter(
+        Transaction.user_id == user.id,
+        Transaction.amount > 0,
+        Transaction.date >= week_ago
+    ).scalar() or 0
+
+    money_out = db.query(func.sum(Transaction.amount)).filter(
+        Transaction.user_id == user.id,
+        Transaction.amount < 0,
+        Transaction.date >= week_ago
+    ).scalar() or 0
+
+    # Топ-3 категории расходов
+    top_cats = db.query(
+        Transaction.category,
+        func.sum(Transaction.amount).label("total")
+    ).filter(
+        Transaction.user_id == user.id,
+        Transaction.amount < 0,
+        Transaction.date >= week_ago
+    ).group_by(Transaction.category).order_by(func.sum(Transaction.amount)).limit(3).all()
+
+    ach_week = db.query(Achievement).filter(
+        Achievement.user_id == user.id,
+        Achievement.unlocked_at >= week_ago
+    ).count()
+
+    lines = [
+        "📊 **Статистика за 7 дней:**\n",
+        f"✨ XP заработано: **{xp_total}**",
+        f"✅ Задач выполнено: **{tasks_done}**",
+        f"💰 Доход: **+{money_in:.0f}**",
+        f"💸 Расход: **{money_out:.0f}**",
+        f"📈 Итог: **{money_in + money_out:+.0f}**",
+        f"🏆 Достижений разблокировано: **{ach_week}**",
+    ]
+
+    if top_cats:
+        lines.append("\n**Топ категорий расходов:**")
+        for cat, total in top_cats:
+            lines.append(f"• {cat}: {total:.0f}")
+
+    bot.reply_to(message, "\n".join(lines), parse_mode="Markdown", reply_markup=get_main_keyboard())
+    db.close()
+
+@bot.message_handler(func=lambda m: m.text == "📊 Неделя")
+def week_button(message):
+    week_command(message)
 
 # === ЗАДАЧИ ===
 def format_task_line(task, idx=None):
@@ -577,14 +794,16 @@ def callback_task_done(call):
         streak_msg = ""
 
     xp_for_task = 10 if task.task_type == "one_time" else 5
-    user.xp += xp_for_task
-    xp_needed = int(100 * (1.5 ** user.level))
-    level_up_msg = ""
-    while user.xp >= xp_needed:
-        user.xp -= xp_needed
-        user.level += 1
-        xp_needed = int(100 * (1.5 ** user.level))
-        level_up_msg = f"\n\n🎉 Уровень повышен! Теперь Level {user.level}!"
+    level_up = add_xp(user, xp_for_task, "task", db)
+
+    # Достижения
+    new_achievements = check_task_achievements(user, db)
+    ach_msg, bonus_xp = format_achievements_msg(new_achievements, user) if new_achievements else ("", 0)
+
+    # Бонус XP за streak
+    bonus_level_up = None
+    if bonus_xp > 0:
+        bonus_level_up = add_xp(user, bonus_xp, "streak_bonus", db)
 
     db.commit()
     bot.answer_callback_query(call.id, "Выполнено! ✅")
@@ -604,7 +823,14 @@ def callback_task_done(call):
         except Exception:
             pass
 
-    bot.send_message(chat_id, f"✅ Выполнено: {task.description}{streak_msg}\n✨ +{xp_for_task} XP{level_up_msg}", parse_mode="Markdown")
+    msg = f"✅ Выполнено: {task.description}{streak_msg}\n✨ +{xp_for_task} XP"
+    if level_up:
+        msg += f"\n\n{level_up}"
+    if bonus_level_up:
+        msg += f"\n\n{bonus_level_up}"
+    if ach_msg:
+        msg += ach_msg
+    bot.send_message(chat_id, msg, parse_mode="Markdown")
     db.close()
 
 @bot.callback_query_handler(func=lambda call: call.data.startswith('task_del:'))
@@ -652,8 +878,8 @@ def send_welcome(message):
                      f"🧠 Модель: {model_name}\n"
                      f"🎨 Модель картинок: {hf_model_name}\n"
                      f"📐 Формат: {format_name}\n"
-                     f"Умею: текст, фото, голосовые, картинки, задачи.\n"
-                     f"Команды: /models /settings /image_models /format /image /profile /tasks",
+                     f"Умею: текст, фото, голосовые, картинки, задачи, RPG-прогресс.\n"
+                     f"Команды: /models /settings /image_models /format /image /profile /tasks /achievements /week",
                      reply_markup=get_main_keyboard())
 
 @bot.message_handler(commands=['help'])
@@ -668,12 +894,15 @@ def help_command(message):
         "• 🧠 /models – модель Gemini.\n"
         "• ⚙️ /settings – контекст, температура.\n"
         "• 👤 /profile – уровень, XP, баланс.\n"
-        "• 📋 /tasks – список задач.\n\n"
+        "• 📋 /tasks – список задач.\n"
+        "• 🏆 /achievements – достижения.\n"
+        "• 📊 /week – статистика за неделю.\n\n"
         "📝 Как ставить задачи:\n"
         "• «Завтра в 15:00 позвонить врачу»\n"
         "• «Каждый день в 8:00 выпить воду»\n"
         "• «Каждый Пн и Ср в 19:00 читать»\n"
-        "Напомню за 5 минут до времени."
+        "Напомню за 5 минут до времени.\n"
+        "Каждый день в 9:00 присылаю утренний отчёт с задачами."
     )
     bot.reply_to(message, help_text, reply_markup=get_main_keyboard())
 
@@ -878,21 +1107,20 @@ def reply_text(message):
             category = parsed.get("category") or "Разное"
             task_data = parsed.get("task")
 
+            new_achievements = []
+
             if xp_gain > 0:
-                user.xp += xp_gain
-                xp_needed = int(100 * (1.5 ** user.level))
-                while user.xp >= xp_needed:
-                    user.xp -= xp_needed
-                    user.level += 1
-                    xp_needed = int(100 * (1.5 ** user.level))
-                    reply_text += f"\n\n🎉 Уровень повышен! Теперь Level {user.level}!"
+                level_up = add_xp(user, xp_gain, "chat", db)
                 reply_text += f"\n\n✨ +{xp_gain} XP"
+                if level_up:
+                    reply_text += f"\n\n{level_up}"
 
             if money_change != 0:
                 user.balance += money_change
                 db.add(Transaction(user_id=user.id, amount=money_change, category=category, description=user_text[:50]))
                 sign = "+" if money_change > 0 else ""
                 reply_text += f"\n💰 Баланс: {sign}{money_change} ({category}). Текущий: {user.balance:.2f}"
+                new_achievements.extend(check_money_achievements(user, money_change, db))
 
             if task_data and isinstance(task_data, dict):
                 try:
@@ -936,6 +1164,19 @@ def reply_text(message):
                         reply_text += f"\n\n📅 По {t_days}: {t_desc} в {t_time}"
                 except Exception as e:
                     print(f"Ошибка задачи: {e}", flush=True)
+
+            # Проверяем достижения по уровню (после add_xp)
+            new_achievements.extend(check_task_achievements(user, db))
+
+            if new_achievements:
+                # убираем дубли
+                new_achievements = list(dict.fromkeys(new_achievements))
+                ach_msg, bonus_xp = format_achievements_msg(new_achievements, user)
+                reply_text += ach_msg
+                if bonus_xp > 0:
+                    lvl = add_xp(user, bonus_xp, "streak_bonus", db)
+                    if lvl:
+                        reply_text += f"\n\n{lvl}"
 
             db.commit()
             send_long_message(chat_id, reply_text, message.message_id)
@@ -1124,6 +1365,68 @@ def check_tasks():
     finally:
         db.close()
 
+# === УТРЕННИЙ ОТЧЁТ ===
+def send_morning_reports():
+    db = SessionLocal()
+    try:
+        now = now_local()
+        today_str = now.strftime("%Y-%m-%d")
+        weekday = now.weekday()
+
+        users = db.query(User).all()
+        for user in users:
+            try:
+                if user.last_report_date == today_str:
+                    continue
+
+                tasks = db.query(Task).filter(Task.user_id == user.id, Task.is_active == True).all()
+                if not tasks:
+                    user.last_report_date = today_str
+                    continue
+
+                today_tasks = []
+                for t in tasks:
+                    if t.task_type == "one_time":
+                        if t.time_str:
+                            try:
+                                dt = datetime.strptime(t.time_str, "%Y-%m-%d %H:%M")
+                                if dt.date() == now.date():
+                                    today_tasks.append(f"🎯 {t.description} — {dt.strftime('%H:%M')}")
+                            except Exception:
+                                pass
+                    elif t.task_type == "daily":
+                        today_tasks.append(f"🔁 {t.description} — {t.time_str or '—'}")
+                    elif t.task_type == "weekly":
+                        if t.days:
+                            task_days = []
+                            for d in t.days.split(","):
+                                d_clean = d.strip().lower()
+                                if d_clean in WEEKDAYS_MAP:
+                                    task_days.append(WEEKDAYS_MAP[d_clean])
+                            if weekday in task_days:
+                                today_tasks.append(f"📅 {t.description} — {t.time_str or '—'}")
+
+                if not today_tasks:
+                    user.last_report_date = today_str
+                    continue
+
+                text = f"☀️ **Доброе утро!**\n\nПлан на сегодня:\n" + "\n".join(today_tasks)
+                text += f"\n\n✨ XP: {user.xp} | 💰 Баланс: {user.balance:.0f}"
+
+                try:
+                    bot.send_message(user.telegram_id, text, parse_mode="Markdown")
+                    user.last_report_date = today_str
+                except Exception as e:
+                    print(f"Не могу отправить отчёт {user.telegram_id}: {e}", flush=True)
+            except Exception as e:
+                print(f"Ошибка отчёта для {user.id}: {e}", flush=True)
+
+        db.commit()
+    except Exception as e:
+        print(f"Ошибка утренних отчётов: {e}", flush=True)
+    finally:
+        db.close()
+
 # === Веб-сервер ===
 if os.environ.get("PORT"):
     from flask import Flask
@@ -1141,6 +1444,7 @@ if os.environ.get("PORT"):
 # === ЗАПУСК ===
 if __name__ == "__main__":
     scheduler.add_job(check_tasks, 'interval', minutes=1)
+    scheduler.add_job(send_morning_reports, 'cron', hour=9, minute=0)
     scheduler.start()
     print("✅ Бот запущен!", flush=True)
     bot.infinity_polling()
