@@ -1052,6 +1052,41 @@ def send_welcome(message):
     )
     bot.send_message(chat_id, text, parse_mode="Markdown", reply_markup=get_main_keyboard())
 
+@bot.message_handler(commands=['help'])
+def help_command(message):
+    help_text = (
+        "📚 **Помощь**\n\n"
+        "**💬 Общение**\n"
+        "• Просто пиши текст — отвечу на вопрос\n"
+        "• Отправь фото — опишу\n"
+        "• Отправь голосовое — расшифрую\n\n"
+        "**🖼 Картинки**\n"
+        "• `/image кот в космосе` — сгенерировать\n"
+        "• `/image_models` — выбрать модель\n"
+        "• `/format` — квадрат / широкий / вертикальный\n\n"
+        "**📋 Задачи**\n"
+        "• «Завтра в 15:00 позвонить врачу» — разовая\n"
+        "• «Каждый день в 8:00 выпить воду» — ежедневная\n"
+        "• «Каждый Пн и Ср в 19:00 читать» — еженедельная\n"
+        "• `/tasks` — список задач\n"
+        "Напомню за 5 минут до времени.\n\n"
+        "**💰 Финансы**\n"
+        "• «Потратил 500 на еду» — трата\n"
+        "• «Зарплата 50000» — доход\n"
+        "• Спрашивай: «сколько потратил на еду за месяц?»\n\n"
+        "**🏆 Прогресс**\n"
+        "• `/profile` — уровень, XP, баланс\n"
+        "• `/achievements` — достижения\n"
+        "• `/week` — статистика за 7 дней\n\n"
+        "**⚙️ Настройки**\n"
+        "• `/models` — модель ответов\n"
+        "• `/settings` — контекст, температура\n"
+        "• `/stats` — текущие настройки\n"
+        "• `/reset_stats` — сброс статистики\n"
+        "• `/reset` — сброс истории чата"
+    )
+    bot.reply_to(message, help_text, parse_mode="Markdown", reply_markup=get_main_keyboard())
+
 @bot.message_handler(commands=['stats'])
 def stats_command(message):
     chat_id = message.chat.id
