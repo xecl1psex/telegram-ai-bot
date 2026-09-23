@@ -134,11 +134,11 @@ IMAGE_FORMATS = {
 }
 
 # === Планировщик задач (APScheduler) ===
-scheduler = BackgroundScheduler(timezone="Europe/Moscow") # Укажите ваш часовой пояс
+scheduler = BackgroundScheduler(timezone="Europe/Moscow")  # Укажи свой часовой пояс
 
 # === Вспомогательные функции для работы с БД ===
 def get_db_user(chat_id):
-    """Возвращает объект пользователя из БД и сессию. Не забудьте закрыть сессию!"""
+    """Возвращает объект пользователя из БД и сессию. Не забудь закрыть сессию!"""
     db = SessionLocal()
     user = db.query(User).filter(User.telegram_id == chat_id).first()
     if not user:
@@ -151,7 +151,7 @@ def get_db_user(chat_id):
 # === Клавиатура ===
 def get_main_keyboard():
     markup = ReplyKeyboardMarkup(row_width=2, resize_keyboard=True)
-    btn_profile = KeyboardButton("👤 Профиль") # Новая кнопка
+    btn_profile = KeyboardButton("👤 Профиль")
     btn_models = KeyboardButton("🧠 Модели")
     btn_settings = KeyboardButton("⚙️ Настройки")
     btn_image = KeyboardButton("🎨 Нарисовать")
@@ -171,11 +171,10 @@ def get_history(chat_id):
 
 def trim_history(chat_id):
     history = get_history(chat_id)
-    # Берем настройку из БД
     user, db = get_db_user(chat_id)
     limit = user.history_len
     db.close()
-    
+
     if len(history) > limit + 1:
         system_msg = None
         if history and history[0]["role"] == "system":
@@ -199,7 +198,8 @@ def update_history(chat_id, role, content):
     trim_history(chat_id)
 
 def clear_history(chat_id):
-    chat_history[chat_id] = [{"role": "system", "content": "Ты — полезный ИИ-ассистент. Отвечай кратко и по делу."}]
+    # Не добавляем system-сообщение — свой промпт мы добавляем в reply_text
+    chat_history[chat_id] = []
 
 # === Форматирование Markdown -> HTML для Telegram ===
 def format_plain_text(text):
@@ -235,11 +235,13 @@ def split_for_telegram(text, max_len=3500):
     parts = re.split(r'(```\w*\n?.*?```)', text, flags=re.DOTALL)
     chunks, current = [], ""
     for part in parts:
-        if not part: continue
+        if not part:
+            continue
         if len(current) + len(part) <= max_len:
             current += part
         else:
-            if current: chunks.append(current)
+            if current:
+                chunks.append(current)
             if len(part) > max_len:
                 remaining = part
                 while len(remaining) > max_len:
@@ -250,17 +252,20 @@ def split_for_telegram(text, max_len=3500):
                         if p > max_len // 2:
                             cut = p + len(sep)
                             break
-                    if cut == -1: cut = max_len
+                    if cut == -1:
+                        cut = max_len
                     chunks.append(remaining[:cut])
                     remaining = remaining[cut:]
                 current = remaining
             else:
                 current = part
-    if current: chunks.append(current)
+    if current:
+        chunks.append(current)
     return chunks
 
 def send_long_message(chat_id, text, reply_to_message_id=None):
-    if not text: return
+    if not text:
+        return
     chunks = split_for_telegram(text)
     for i, chunk in enumerate(chunks):
         html_chunk = markdown_to_html(chunk)
@@ -306,7 +311,7 @@ def build_formats_keyboard(chat_id):
     user, db = get_db_user(chat_id)
     current = user.format
     db.close()
-    
+
     markup = InlineKeyboardMarkup(row_width=1)
     for fmt_id, info in IMAGE_FORMATS.items():
         check = " ✅" if fmt_id == current else ""
@@ -322,12 +327,12 @@ def show_formats(message):
 def callback_set_format(call):
     chat_id = call.message.chat.id
     fmt_id = call.data.split(':', 1)[1]
-    
+
     user, db = get_db_user(chat_id)
     user.format = fmt_id
     db.commit()
     db.close()
-    
+
     info = IMAGE_FORMATS[fmt_id]
     bot.answer_callback_query(call.id, f"Формат: {info['name']}")
     bot.edit_message_text(chat_id=chat_id, message_id=call.message.message_id, text=f"✅ Формат: *{info['name']}*\n\n{info['desc']}", parse_mode="Markdown")
@@ -337,7 +342,7 @@ def build_hf_models_keyboard(chat_id):
     user, db = get_db_user(chat_id)
     current = user.hf_model
     db.close()
-    
+
     markup = InlineKeyboardMarkup(row_width=1)
     for model_id, info in HF_MODELS.items():
         check = " ✅" if model_id == current else ""
@@ -353,12 +358,12 @@ def show_hf_models(message):
 def callback_set_hf_model(call):
     chat_id = call.message.chat.id
     model_id = call.data.split(':', 1)[1]
-    
+
     user, db = get_db_user(chat_id)
     user.hf_model = model_id
     db.commit()
     db.close()
-    
+
     info = HF_MODELS[model_id]
     bot.answer_callback_query(call.id, f"Выбрана модель: {info['name']}")
     bot.edit_message_text(chat_id=chat_id, message_id=call.message.message_id, text=f"✅ Модель: *{info['name']}*\n\n{info['desc']}", parse_mode="Markdown")
@@ -368,7 +373,7 @@ def build_models_keyboard(chat_id):
     user, db = get_db_user(chat_id)
     current_model = user.model
     db.close()
-    
+
     markup = InlineKeyboardMarkup(row_width=1)
     for model_id, info in MODEL_INFO.items():
         check = " ✅" if model_id == current_model else ""
@@ -398,13 +403,13 @@ def callback_model_info(call):
 def callback_confirm_model(call):
     chat_id = call.message.chat.id
     model_id = call.data.split(':', 1)[1]
-    
+
     user, db = get_db_user(chat_id)
     user.model = model_id
     db.commit()
     current_thinking = user.thinking
     db.close()
-    
+
     markup = InlineKeyboardMarkup(row_width=1)
     for level_id, level_name in THINKING_LEVELS.items():
         check = " ✅" if level_id == current_thinking else ""
@@ -416,13 +421,13 @@ def callback_confirm_model(call):
 def callback_thinking(call):
     chat_id = call.message.chat.id
     level = call.data.split(':', 1)[1]
-    
+
     user, db = get_db_user(chat_id)
     user.thinking = level
     model_id = user.model
     db.commit()
     db.close()
-    
+
     bot.edit_message_text(chat_id=chat_id, message_id=call.message.message_id, text=f"✅ *Настройки сохранены!*\n\n🧠 Модель: {MODEL_INFO[model_id]['name']}\n⚙️ Режим: {THINKING_LEVELS[level]}", parse_mode="Markdown")
     bot.answer_callback_query(call.id, "Сохранено!")
 
@@ -452,9 +457,9 @@ def show_settings(message):
 def callback_settings(call):
     chat_id = call.message.chat.id
     action = call.data.split(':', 1)[1]
-    
+
     user, db = get_db_user(chat_id)
-    
+
     if action == "history":
         current = user.history_len
         markup = InlineKeyboardMarkup(row_width=1)
@@ -488,7 +493,7 @@ def callback_settings(call):
         bot.edit_message_text(chat_id=chat_id, message_id=call.message.message_id, text="✅ *Настройки сброшены!*", reply_markup=build_settings_keyboard(chat_id), parse_mode="Markdown")
     elif action == "back":
         bot.edit_message_text(chat_id=chat_id, message_id=call.message.message_id, text="⚙️ *Настройки контекста*", reply_markup=build_settings_keyboard(chat_id), parse_mode="Markdown")
-    
+
     db.close()
     bot.answer_callback_query(call.id)
 
@@ -531,9 +536,9 @@ def callback_set_tokens(call):
 def profile_command(message):
     chat_id = message.chat.id
     user, db = get_db_user(chat_id)
-    
+
     xp_needed = int(100 * (1.5 ** user.level))
-    
+
     text = (
         f"👤 **Профиль**\n\n"
         f"🏆 Уровень: {user.level}\n"
@@ -550,12 +555,12 @@ def send_welcome(message):
     chat_id = message.chat.id
     clear_history(chat_id)
     user, db = get_db_user(chat_id)
-    
+
     model_name = MODEL_INFO[user.model]["name"]
     hf_model_name = HF_MODELS[user.hf_model]["name"]
     format_name = IMAGE_FORMATS[user.format]["name"]
     db.close()
-    
+
     bot.send_message(chat_id,
                      f"Привет! Я бот на нейросети Gemini.\n"
                      f"🧠 Модель: {model_name}\n"
@@ -590,7 +595,7 @@ def stats_command(message):
     history = get_history(chat_id)
     total_chars = sum(len(str(msg["content"])) for msg in history)
     user, db = get_db_user(chat_id)
-    
+
     bot.reply_to(message,
                  f"📊 *Текущий статус:*\n\n"
                  f"🧠 Модель Gemini: {MODEL_INFO[user.model]['name']}\n"
@@ -699,28 +704,28 @@ def reply_text(message):
     bot.send_chat_action(chat_id, 'typing')
 
     user, db = get_db_user(chat_id)
-    
-    # RPG: Специальный системный промпт для Gemini
+
     system_prompt = (
         "Ты — Cyberpunk-lite ассистент в Telegram. Ты общаешься с пользователем как обычная нейросеть, "
         "но параллельно отслеживаешь его прогресс в RPG-стиле.\n"
-        "Анализируй сообщение пользователя.\n"
-        "1. Если это обычный вопрос, болтовня или запрос на генерацию картинки — просто ответь в поле 'reply', "
-        "а остальные поля оставь по нулям (xp: 0, money: 0, task: null).\n"
-        "2. Если пользователь выполнил задачу (зубы почистил, уборка, смена на работе) — начисли XP от 5 до 100.\n"
-        "3. Если пользователь упоминает трату или доход — измени баланс (money).\n"
-        "4. Если просит напоминание — создай задачу (task).\n"
-        "Всегда отвечай СТРОГО в формате JSON:\n"
+        "ВСЕГДА отвечай СТРОГО одним JSON-ОБЪЕКТОМ (не массивом, без markdown-обёрток, без ```json):\n"
         "{\n"
         "  \"reply\": \"Твой текстовый ответ пользователю\",\n"
         "  \"xp\": 0,\n"
         "  \"money\": 0,\n"
         "  \"category\": \"\",\n"
         "  \"task\": null\n"
-        "}"
+        "}\n"
+        "Правила:\n"
+        "1. Обычный вопрос / болтовня — просто ответь в 'reply', остальное по нулям.\n"
+        "2. Пользователь выполнил задачу — xp от 5 до 100.\n"
+        "3. Упоминает трату/доход — money (минус для трат), category — категория.\n"
+        "4. Просит напоминание — заполни task: {\"description\": \"...\", \"type\": \"one_time|daily|weekly\", \"time\": \"HH:MM\", \"days\": \"Mon,Wed\"}."
     )
 
-    messages = [{"role": "system", "content": system_prompt}] + get_history(chat_id)
+    # Формируем messages: один system + история без system-сообщений
+    clean_history = [m for m in get_history(chat_id) if m["role"] != "system"]
+    messages = [{"role": "system", "content": system_prompt}] + clean_history
 
     for attempt in range(3):
         try:
@@ -729,7 +734,6 @@ def reply_text(message):
                 "messages": messages,
                 "max_tokens": user.max_tokens,
                 "temperature": user.temperature,
-                "response_format": {"type": "json_object"} # Заставляем Gemini вернуть JSON
             }
             response = requests.post(AI_URL, json=payload, headers=HEADERS, timeout=TIMEOUT)
             data = response.json()
@@ -738,22 +742,73 @@ def reply_text(message):
                 raise ValueError(f"Нет choices: {str(data)[:300]}")
 
             raw_reply = data['choices'][0]['message']['content'].strip()
-            
-            # Очистка от возможных markdown-оберток (```json ... ```)
-            if raw_reply.startswith("```json"):
-                raw_reply = raw_reply[7:-3]
-            elif raw_reply.startswith("```"):
-                raw_reply = raw_reply[3:-3]
-                
-            parsed = json.loads(raw_reply)
-            
-            reply_text = parsed.get("reply", "Ошибка формата ответа.")
-            xp_gain = parsed.get("xp", 0)
-            money_change = parsed.get("money", 0)
-            category = parsed.get("category", "Разное")
+            print(f"🤖 RAW ответ Gemini: {raw_reply[:600]}", flush=True)
+
+            # Убираем markdown-обёртки ```json ... ```
+            cleaned = re.sub(r'^```(?:json)?\s*', '', raw_reply)
+            cleaned = re.sub(r'\s*```$', '', cleaned)
+
+            parsed = None
+            try:
+                parsed = json.loads(cleaned)
+            except json.JSONDecodeError:
+                match = re.search(r'\{[\s\S]*\}', raw_reply)
+                if match:
+                    try:
+                        parsed = json.loads(match.group(0))
+                    except json.JSONDecodeError:
+                        pass
+
+            # Если JSON не получился вообще — отдаём как обычный текст
+            if parsed is None:
+                print(f"⚠️ JSON не распарсился, отправляю как plain", flush=True)
+                send_long_message(chat_id, raw_reply, message.message_id)
+                update_history(chat_id, "assistant", raw_reply)
+                break
+
+            # Если Gemini вернул массив — берём первый элемент
+            if isinstance(parsed, list):
+                print(f"⚠️ Gemini вернул list, беру первый элемент", flush=True)
+                parsed = parsed[0] if parsed else {}
+
+            # Если всё ещё не словарь — fallback
+            if not isinstance(parsed, dict):
+                print(f"⚠️ JSON не dict: {type(parsed)}. Отправляю raw.", flush=True)
+                send_long_message(chat_id, raw_reply, message.message_id)
+                update_history(chat_id, "assistant", raw_reply)
+                break
+
+            # Пробуем разные ключи для текста ответа
+            reply_text = (
+                parsed.get("reply")
+                or parsed.get("response")
+                or parsed.get("message")
+                or parsed.get("text")
+                or parsed.get("content")
+            )
+
+            if not reply_text:
+                for k, v in parsed.items():
+                    if isinstance(v, str) and v.strip():
+                        reply_text = v
+                        break
+                if not reply_text:
+                    reply_text = raw_reply
+
+            try:
+                xp_gain = int(parsed.get("xp", 0) or 0)
+            except (ValueError, TypeError):
+                xp_gain = 0
+
+            try:
+                money_change = float(parsed.get("money", 0) or 0)
+            except (ValueError, TypeError):
+                money_change = 0.0
+
+            category = parsed.get("category") or "Разное"
             task_data = parsed.get("task")
 
-            # 1. Обновляем XP и уровень
+            # 1. XP и уровень
             if xp_gain > 0:
                 user.xp += xp_gain
                 xp_needed = int(100 * (1.5 ** user.level))
@@ -764,30 +819,35 @@ def reply_text(message):
                     reply_text += f"\n\n🎉 **Уровень повышен!** Теперь ты Level {user.level}!"
                 reply_text += f"\n\n✨ +{xp_gain} XP"
 
-            # 2. Обновляем баланс
+            # 2. Баланс
             if money_change != 0:
                 user.balance += money_change
-                db.add(Transaction(user_id=chat.id, amount=money_change, category=category, description=user_text[:50]))
+                db.add(Transaction(
+                    user_id=user.id,
+                    amount=money_change,
+                    category=category,
+                    description=user_text[:50]
+                ))
                 sign = "+" if money_change > 0 else ""
-                reply_text += f"\n💰 Баланс: {sign}{money_change} ({category}). Текущий баланс: {user.balance:.2f}"
+                reply_text += f"\n💰 Баланс: {sign}{money_change} ({category}). Текущий: {user.balance:.2f}"
 
-            # 3. Создаем задачу
-            if task_data:
+            # 3. Задача
+            if task_data and isinstance(task_data, dict):
                 new_task = Task(
-                    user_id=chat.id,
-                    description=task_data['description'],
-                    task_type=task_data['type'],
+                    user_id=user.id,
+                    description=task_data.get('description', 'Без названия'),
+                    task_type=task_data.get('type', 'one_time'),
                     time_str=task_data.get('time'),
                     days=task_data.get('days')
                 )
                 db.add(new_task)
-                reply_text += f"\n\n📝 Задача добавлена: {task_data['description']} в {task_data.get('time')}"
-                # Здесь можно добавить логику добавления в APScheduler
+                reply_text += f"\n\n📝 Задача добавлена: {task_data.get('description')} в {task_data.get('time')}"
 
             db.commit()
             send_long_message(chat_id, reply_text, message.message_id)
-            update_history(chat_id, "assistant", reply_text)
+            update_history(chat_id, "assistant", raw_reply)
             break
+
         except Exception as e:
             print(f"Ошибка (попытка {attempt + 1}): {e}", flush=True)
             if attempt == 2:
@@ -897,17 +957,17 @@ def reply_voice(message):
 
 # === ФОНОВАЯ ПРОВЕРКА ЗАДАЧ (APScheduler) ===
 def check_tasks():
-    """Эта функция запускается каждую минуту и проверяет, не пора ли отправить напоминание."""
+    """Запускается каждую минуту. Пока заглушка — реальную логику напоминаний добавим позже."""
     db = SessionLocal()
-    now = datetime.now()
-    
-    # В реальной логике здесь нужно сверять время задачи с текущим временем
-    # Для примера, просто выберем активные задачи и проверим их время
-    tasks = db.query(Task).filter(Task.is_active == True).all()
-    for task in tasks:
-        # Здесь должна быть логика парсинга task.time_str и отправки сообщения
-        pass
-    db.close()
+    try:
+        tasks = db.query(Task).filter(Task.is_active == True).all()
+        # Логика напоминаний будет добавлена на следующем шаге
+        for task in tasks:
+            pass
+    except Exception as e:
+        print(f"Ошибка планировщика: {e}", flush=True)
+    finally:
+        db.close()
 
 # === Веб-сервер для Render ===
 if os.environ.get("PORT"):
@@ -925,9 +985,8 @@ if os.environ.get("PORT"):
 
 # === ЗАПУСК ===
 if __name__ == "__main__":
-    # Запускаем планировщик
     scheduler.add_job(check_tasks, 'interval', minutes=1)
     scheduler.start()
-    
+
     print("✅ Бот запущен!", flush=True)
     bot.infinity_polling()
