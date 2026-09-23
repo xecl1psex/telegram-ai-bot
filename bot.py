@@ -503,6 +503,171 @@ def translate_to_english(text):
         print(f"⚠️ Ошибка перевода: {e}", flush=True)
     return text
 
+def call_gemini(messages, model, temperature, max_tokens):
+    payload = {
+        "model": model,
+        "messages": messages,
+        "max_tokens": max_tokens,
+        "temperature": temperature,
+    }
+    r = requests.post(AI_URL, json=payload, headers=HEADERS, timeout=TIMEOUT)
+    data = r.json()
+    if 'choices' not in data or not data['choices']:
+        raise ValueError(f"Нет choices: {str(data)[:300]}")
+    return data['choices'][0]['message']['content'].strip()
+
+def parse_gemini_json(raw_reply):
+    cleaned = re.sub(r'^```(?:json)?\s*', '', raw_reply)
+    cleaned = re.sub(r'\s*```$', '', cleaned)
+    parsed = None
+    try:
+        parsed = json.loads(cleaned)
+    except json.JSONDecodeError:
+        match = re.search(r'\{[\s\S]*\}', raw_reply)
+        if match:
+            try:
+                parsed = json.loads(match.group(0))
+            except json.JSONDecodeError:
+                pass
+    if isinstance(parsed, list):
+        parsed = parsed[0] if parsed else {}
+    if not isinstance(parsed, dict):
+        return None
+    return parsed
+
+def build_system_prompt(user, db):
+    """Единый системный промпт для text / voice / photo."""
+    now = now_local()
+    today_str = now.strftime("%Y-%m-%d")
+    weekday_str = WEEKDAYS_RU[now.weekday()]
+    time_str = now.strftime("%H:%M")
+    finance_summary = get_finance_summary(user, db)
+
+    return (
+        "Ты — ассистент. Отвечай кратко.\n\n"
+        f"Дата: {today_str} ({weekday_str}), {time_str} МСК.\n\n"
+        f"Данные пользователя:\n{finance_summary}\n\n"
+        "Если есть данные — используй их. Если нет — заполни query.\n"
+        "Также распознавай:\n"
+        "- полезное действие → xp (5-100)\n"
+        "- трата/доход → money, category\n"
+        "- напоминание/задача → task\n"
+        "- вопрос про финансы → query\n\n"
+        "ВАЖНО по задачам:\n"
+        "- Разовые (one_time) требуют description и время. Если сказано «в четверг» без времени — "
+        "найди ближайший четверг, поставь date=YYYY-MM-DD, time=09:00.\n"
+        "- Ежедневные (daily): description + time (HH:MM).\n"
+        "- Еженедельные (weekly): description + time + days (Mon,Wed).\n"
+        "- ВСЕГДА заполняй task, если пользователь просит напомнить / поставить задачу / не забыть.\n\n"
+        "Ответ — один JSON:\n"
+        "{\"reply\": \"...\", \"xp\": 0, \"money\": 0, \"category\": \"\", \"task\": null, \"query\": null}\n\n"
+        "task: {\"description\": \"...\", \"type\": \"one_time|daily|weekly\", \"date\": \"YYYY-MM-DD\", \"time\": \"HH:MM\", \"days\": \"Mon,Wed\"}\n"
+        "query: {\"type\": \"expenses_by_category|income_by_category|recent_transactions|balance|top_categories\", \"category\": \"...\", \"period\": \"week|month|all\", \"limit\": 10}"
+    )
+
+def handle_parsed_response(parsed, user, db, user_text, chat_id, message_id, now):
+    """Единая логика обработки распарсенного JSON от Gemini.
+    Возвращает финальный текст для отправки."""
+    reply_text_out = (
+        parsed.get("reply") or parsed.get("response") or parsed.get("message")
+        or parsed.get("text") or parsed.get("content")
+    )
+    if not reply_text_out:
+        for v in parsed.values():
+            if isinstance(v, str) and v.strip():
+                reply_text_out = v
+                break
+        if not reply_text_out:
+            reply_text_out = "..."
+
+    try:
+        xp_gain = int(parsed.get("xp", 0) or 0)
+    except (ValueError, TypeError):
+        xp_gain = 0
+
+    try:
+        money_change = float(parsed.get("money", 0) or 0)
+    except (ValueError, TypeError):
+        money_change = 0.0
+
+    category = parsed.get("category") or "Разное"
+    task_data = parsed.get("task")
+
+    new_achievements = []
+
+    if xp_gain > 0:
+        level_up = add_xp(user, xp_gain, "chat", db)
+        reply_text_out += f"\n\n+{xp_gain} XP"
+        if level_up:
+            reply_text_out += f"\n{level_up}"
+
+    if money_change != 0:
+        user.balance += money_change
+        db.add(Transaction(user_id=user.id, amount=money_change, category=category, description=user_text[:50]))
+        sign = "+" if money_change > 0 else ""
+        reply_text_out += f"\n💰 {sign}{money_change} ({category}). Баланс: {user.balance:.2f}"
+        new_achievements.extend(check_money_achievements(user, money_change, db))
+
+    if task_data and isinstance(task_data, dict):
+        try:
+            t_type = task_data.get("type", "one_time")
+            t_time = task_data.get("time")
+            t_days = task_data.get("days")
+            t_date = task_data.get("date")
+            t_desc = task_data.get("description", "Задача")
+
+            stored_time = t_time
+            if t_type == "one_time":
+                if t_date and t_time:
+                    stored_time = f"{t_date} {t_time}"
+                elif t_date and not t_time:
+                    stored_time = f"{t_date} 09:00"
+                elif t_time and not t_date:
+                    stored_time = f"{now.strftime('%Y-%m-%d')} {t_time}"
+            elif t_type in ("daily", "weekly"):
+                stored_time = t_time
+
+            if t_type == "weekly" and t_days:
+                days_list = []
+                for d in str(t_days).split(","):
+                    d_clean = d.strip().lower()
+                    if d_clean in WEEKDAYS_MAP:
+                        days_list.append(["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"][WEEKDAYS_MAP[d_clean]])
+                    else:
+                        days_list.append(d.strip())
+                t_days = ",".join(days_list)
+
+            new_task = Task(
+                user_id=user.id,
+                description=t_desc,
+                task_type=t_type,
+                time_str=stored_time,
+                days=t_days,
+            )
+            db.add(new_task)
+
+            if t_type == "one_time":
+                reply_text_out += f"\n📝 {t_desc} — {stored_time}"
+            elif t_type == "daily":
+                reply_text_out += f"\n🔁 {t_desc} в {t_time}"
+            elif t_type == "weekly":
+                reply_text_out += f"\n📅 {t_desc} — {t_days} {t_time}"
+        except Exception as e:
+            print(f"Ошибка задачи: {e}", flush=True)
+
+    new_achievements.extend(check_task_achievements(user, db))
+
+    if new_achievements:
+        new_achievements = list(dict.fromkeys(new_achievements))
+        ach_msg, bonus_xp = format_achievements_msg(new_achievements, user)
+        reply_text_out += ach_msg
+        if bonus_xp > 0:
+            lvl = add_xp(user, bonus_xp, "streak_bonus", db)
+            if lvl:
+                reply_text_out += f"\n{lvl}"
+
+    return reply_text_out
+
 # === ФОРМАТ ===
 def build_formats_keyboard(chat_id):
     user, db = get_db_user(chat_id)
@@ -1181,39 +1346,6 @@ def generate_image(message):
         else:
             bot.reply_to(message, f"❌ Ошибка: {error_str[:200]}", reply_markup=get_main_keyboard())
 
-# === ВЫЗОВ GEMINI ===
-def call_gemini(messages, model, temperature, max_tokens):
-    payload = {
-        "model": model,
-        "messages": messages,
-        "max_tokens": max_tokens,
-        "temperature": temperature,
-    }
-    r = requests.post(AI_URL, json=payload, headers=HEADERS, timeout=TIMEOUT)
-    data = r.json()
-    if 'choices' not in data or not data['choices']:
-        raise ValueError(f"Нет choices: {str(data)[:300]}")
-    return data['choices'][0]['message']['content'].strip()
-
-def parse_gemini_json(raw_reply):
-    cleaned = re.sub(r'^```(?:json)?\s*', '', raw_reply)
-    cleaned = re.sub(r'\s*```$', '', cleaned)
-    parsed = None
-    try:
-        parsed = json.loads(cleaned)
-    except json.JSONDecodeError:
-        match = re.search(r'\{[\s\S]*\}', raw_reply)
-        if match:
-            try:
-                parsed = json.loads(match.group(0))
-            except json.JSONDecodeError:
-                pass
-    if isinstance(parsed, list):
-        parsed = parsed[0] if parsed else {}
-    if not isinstance(parsed, dict):
-        return None
-    return parsed
-
 # === ОБРАБОТКА ТЕКСТА ===
 @bot.message_handler(content_types=['text'])
 def reply_text(message):
@@ -1226,36 +1358,16 @@ def reply_text(message):
     bot.send_chat_action(chat_id, 'typing')
 
     user, db = get_db_user(chat_id)
-
     now = now_local()
-    today_str = now.strftime("%Y-%m-%d")
-    weekday_str = WEEKDAYS_RU[now.weekday()]
-    time_str = now.strftime("%H:%M")
 
-    finance_summary = get_finance_summary(user, db)
-
-    system_prompt = (
-        "Ты — ассистент. Отвечай кратко.\n\n"
-        f"Дата: {today_str} ({weekday_str}), {time_str} МСК.\n\n"
-        f"Данные пользователя:\n{finance_summary}\n\n"
-        "Если есть данные — используй их. Если нет — заполни query.\n"
-        "Также распознавай:\n"
-        "- полезное действие → xp (5-100)\n"
-        "- трата/доход → money, category\n"
-        "- напоминание → task\n\n"
-        "Ответ — один JSON:\n"
-        "{\"reply\": \"...\", \"xp\": 0, \"money\": 0, \"category\": \"\", \"task\": null, \"query\": null}\n\n"
-        "task: {\"description\": \"...\", \"type\": \"one_time|daily|weekly\", \"date\": \"YYYY-MM-DD\", \"time\": \"HH:MM\", \"days\": \"Mon,Wed\"}\n"
-        "query: {\"type\": \"expenses_by_category|income_by_category|recent_transactions|balance|top_categories\", \"category\": \"...\", \"period\": \"week|month|all\", \"limit\": 10}"
-    )
-
+    system_prompt = build_system_prompt(user, db)
     clean_history = [m for m in get_history(chat_id) if m["role"] != "system"]
     messages = [{"role": "system", "content": system_prompt}] + clean_history
 
     for attempt in range(3):
         try:
             raw_reply = call_gemini(messages, user.model, user.temperature, user.max_tokens)
-            print(f"🤖 RAW: {raw_reply[:600]}", flush=True)
+            print(f"🤖 TXT RAW: {raw_reply[:600]}", flush=True)
 
             parsed = parse_gemini_json(raw_reply)
             if parsed is None:
@@ -1263,6 +1375,7 @@ def reply_text(message):
                 update_history(chat_id, "assistant", raw_reply)
                 break
 
+            # Обработка query (второй вызов Gemini)
             query = parsed.get("query")
             if query and isinstance(query, dict):
                 print(f"🔍 {query}", flush=True)
@@ -1277,130 +1390,35 @@ def reply_text(message):
                     )}
                 ]
                 raw_reply = call_gemini(second_messages, user.model, user.temperature, user.max_tokens)
-                print(f"🤖 RAW2: {raw_reply[:600]}", flush=True)
+                print(f"🤖 TXT RAW2: {raw_reply[:600]}", flush=True)
                 parsed = parse_gemini_json(raw_reply)
                 if parsed is None:
                     send_long_message(chat_id, raw_reply, message.message_id)
                     update_history(chat_id, "assistant", raw_reply)
                     break
 
-            reply_text_out = (
-                parsed.get("reply") or parsed.get("response") or parsed.get("message")
-                or parsed.get("text") or parsed.get("content")
-            )
-            if not reply_text_out:
-                for v in parsed.values():
-                    if isinstance(v, str) and v.strip():
-                        reply_text_out = v
-                        break
-                if not reply_text_out:
-                    reply_text_out = raw_reply
-
-            try:
-                xp_gain = int(parsed.get("xp", 0) or 0)
-            except (ValueError, TypeError):
-                xp_gain = 0
-
-            try:
-                money_change = float(parsed.get("money", 0) or 0)
-            except (ValueError, TypeError):
-                money_change = 0.0
-
-            category = parsed.get("category") or "Разное"
-            task_data = parsed.get("task")
-
-            new_achievements = []
-
-            if xp_gain > 0:
-                level_up = add_xp(user, xp_gain, "chat", db)
-                reply_text_out += f"\n\n+{xp_gain} XP"
-                if level_up:
-                    reply_text_out += f"\n{level_up}"
-
-            if money_change != 0:
-                user.balance += money_change
-                db.add(Transaction(user_id=user.id, amount=money_change, category=category, description=user_text[:50]))
-                sign = "+" if money_change > 0 else ""
-                reply_text_out += f"\n💰 {sign}{money_change} ({category}). Баланс: {user.balance:.2f}"
-                new_achievements.extend(check_money_achievements(user, money_change, db))
-
-            if task_data and isinstance(task_data, dict):
-                try:
-                    t_type = task_data.get("type", "one_time")
-                    t_time = task_data.get("time")
-                    t_days = task_data.get("days")
-                    t_desc = task_data.get("description", "Задача")
-
-                    stored_time = t_time
-                    if t_type == "one_time":
-                        t_date = task_data.get("date")
-                        if t_date and t_time:
-                            stored_time = f"{t_date} {t_time}"
-                        elif t_time:
-                            stored_time = f"{now.strftime('%Y-%m-%d')} {t_time}"
-
-                    if t_type == "weekly" and t_days:
-                        days_list = []
-                        for d in str(t_days).split(","):
-                            d_clean = d.strip().lower()
-                            if d_clean in WEEKDAYS_MAP:
-                                days_list.append(["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"][WEEKDAYS_MAP[d_clean]])
-                            else:
-                                days_list.append(d.strip())
-                        t_days = ",".join(days_list)
-
-                    new_task = Task(
-                        user_id=user.id,
-                        description=t_desc,
-                        task_type=t_type,
-                        time_str=stored_time,
-                        days=t_days,
-                    )
-                    db.add(new_task)
-
-                    if t_type == "one_time":
-                        reply_text_out += f"\n📝 {t_desc} — {stored_time}"
-                    elif t_type == "daily":
-                        reply_text_out += f"\n🔁 {t_desc} в {t_time}"
-                    elif t_type == "weekly":
-                        reply_text_out += f"\n📅 {t_desc} — {t_days} {t_time}"
-                except Exception as e:
-                    print(f"Ошибка задачи: {e}", flush=True)
-
-            new_achievements.extend(check_task_achievements(user, db))
-
-            if new_achievements:
-                new_achievements = list(dict.fromkeys(new_achievements))
-                ach_msg, bonus_xp = format_achievements_msg(new_achievements, user)
-                reply_text_out += ach_msg
-                if bonus_xp > 0:
-                    lvl = add_xp(user, bonus_xp, "streak_bonus", db)
-                    if lvl:
-                        reply_text_out += f"\n{lvl}"
-
+            final_text = handle_parsed_response(parsed, user, db, user_text, chat_id, message.message_id, now)
             db.commit()
-            send_long_message(chat_id, reply_text_out, message.message_id)
+            send_long_message(chat_id, final_text, message.message_id)
             update_history(chat_id, "assistant", raw_reply)
             break
 
         except Exception as e:
-            print(f"Ошибка ({attempt + 1}): {e}", flush=True)
+            print(f"Ошибка TXT ({attempt + 1}): {e}", flush=True)
             if attempt == 2:
                 bot.reply_to(message, "❌ Ошибка", reply_markup=get_main_keyboard())
             else:
                 time.sleep(2 * (attempt + 1))
     db.close()
 
-# === ФОТО ===
+# === ОБРАБОТКА ФОТО ===
 @bot.message_handler(content_types=['photo'])
 def reply_photo(message):
     chat_id = message.chat.id
     bot.send_chat_action(chat_id, 'typing')
+
     user, db = get_db_user(chat_id)
-    model = user.model
-    temperature = user.temperature
-    max_tokens = user.max_tokens
-    db.close()
+    now = now_local()
 
     for attempt in range(3):
         try:
@@ -1412,40 +1430,49 @@ def reply_photo(message):
             image.save(buff, format="JPEG")
             base64_image = base64.b64encode(buff.getvalue()).decode('utf-8')
 
-            payload = {
-                "model": model,
-                "messages": [{"role": "user", "content": [
-                    {"type": "text", "text": "Опиши фото на русском."},
+            system_prompt = build_system_prompt(user, db)
+            caption = message.caption or "Опиши фото. Если это чек или скрин — извлеки сумму и категорию."
+
+            messages = [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": [
+                    {"type": "text", "text": caption},
                     {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{base64_image}"}}
-                ]}],
-                "max_tokens": max_tokens,
-                "temperature": temperature
-            }
-            response = requests.post(AI_URL, json=payload, headers=HEADERS, timeout=TIMEOUT)
-            data = response.json()
-            if 'choices' not in data or not data['choices']:
-                raise ValueError(f"Нет choices: {str(data)[:300]}")
-            reply = data['choices'][0]['message']['content'].strip()
-            send_long_message(chat_id, reply, message.message_id)
-            update_history(chat_id, "assistant", reply)
+                ]}
+            ]
+
+            raw_reply = call_gemini(messages, user.model, user.temperature, user.max_tokens)
+            print(f"🤖 PHOTO RAW: {raw_reply[:600]}", flush=True)
+
+            parsed = parse_gemini_json(raw_reply)
+            if parsed is None:
+                send_long_message(chat_id, raw_reply, message.message_id)
+                update_history(chat_id, "assistant", raw_reply)
+                break
+
+            user_text = caption[:100]
+            final_text = handle_parsed_response(parsed, user, db, user_text, chat_id, message.message_id, now)
+            db.commit()
+            send_long_message(chat_id, final_text, message.message_id)
+            update_history(chat_id, "assistant", raw_reply)
             break
+
         except Exception as e:
-            print(f"Ошибка фото: {e}", flush=True)
+            print(f"Ошибка PHOTO ({attempt + 1}): {e}", flush=True)
             if attempt == 2:
                 bot.reply_to(message, "❌ Ошибка", reply_markup=get_main_keyboard())
             else:
                 time.sleep(2 * (attempt + 1))
+    db.close()
 
-# === ГОЛОС ===
+# === ОБРАБОТКА ГОЛОСОВЫХ ===
 @bot.message_handler(content_types=['voice'])
 def reply_voice(message):
     chat_id = message.chat.id
     bot.send_chat_action(chat_id, 'typing')
+
     user, db = get_db_user(chat_id)
-    model = user.model
-    temperature = user.temperature
-    max_tokens = user.max_tokens
-    db.close()
+    now = now_local()
 
     try:
         file_info = bot.get_file(message.voice.file_id)
@@ -1455,25 +1482,37 @@ def reply_voice(message):
         audio.export(wav_buffer, format="wav")
         base64_audio = base64.b64encode(wav_buffer.getvalue()).decode('utf-8')
 
-        payload = {
-            "model": model,
-            "messages": [{"role": "user", "content": [
-                {"type": "text", "text": "Расшифруй и ответь на русском."},
+        system_prompt = build_system_prompt(user, db)
+
+        messages = [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": [
+                {"type": "text", "text": "Расшифруй голосовое и выполни то, что просят."},
                 {"type": "input_audio", "input_audio": {"data": base64_audio, "format": "wav"}}
-            ]}],
-            "max_tokens": max_tokens,
-            "temperature": temperature
-        }
-        response = requests.post(AI_URL, json=payload, headers=HEADERS, timeout=TIMEOUT)
-        data = response.json()
-        if 'choices' not in data or not data['choices']:
-            raise ValueError(f"Нет choices: {str(data)[:300]}")
-        reply = data['choices'][0]['message']['content'].strip()
-        send_long_message(chat_id, reply, message.message_id)
-        update_history(chat_id, "assistant", reply)
+            ]}
+        ]
+
+        raw_reply = call_gemini(messages, user.model, user.temperature, user.max_tokens)
+        print(f"🤖 VOICE RAW: {raw_reply[:600]}", flush=True)
+
+        parsed = parse_gemini_json(raw_reply)
+        if parsed is None:
+            send_long_message(chat_id, raw_reply, message.message_id)
+            update_history(chat_id, "assistant", raw_reply)
+            db.close()
+            return
+
+        user_text = "голосовое"
+        final_text = handle_parsed_response(parsed, user, db, user_text, chat_id, message.message_id, now)
+        db.commit()
+        send_long_message(chat_id, final_text, message.message_id)
+        update_history(chat_id, "assistant", raw_reply)
+
     except Exception as e:
-        print(f"Ошибка голосового: {e}", flush=True)
+        print(f"Ошибка VOICE: {e}", flush=True)
         bot.reply_to(message, "❌ Ошибка", reply_markup=get_main_keyboard())
+    finally:
+        db.close()
 
 # === НАПОМИНАНИЯ ===
 def send_task_reminder(task, user):
