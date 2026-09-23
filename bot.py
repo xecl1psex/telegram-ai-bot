@@ -19,6 +19,7 @@ from dotenv import load_dotenv
 from pydub import AudioSegment
 from huggingface_hub import InferenceClient
 from datetime import datetime, timedelta
+from zoneinfo import ZoneInfo
 from apscheduler.schedulers.background import BackgroundScheduler
 
 from database import SessionLocal, User, Task, Transaction
@@ -46,17 +47,17 @@ HF_MODELS = {
     "sdxl": {
         "id": "stabilityai/stable-diffusion-xl-base-1.0",
         "name": "🎨 SDXL Base 1.0",
-        "desc": "Мощная, стабильно бесплатная. Хорошо рисует всё.",
+        "desc": "Мощная, стабильно бесплатная.",
     },
     "sdxl_turbo": {
         "id": "stabilityai/sdxl-turbo",
         "name": "⚡ SDXL Turbo",
-        "desc": "Быстрая, 1-4 шага генерации. Отлично для черновиков.",
+        "desc": "Быстрая, 1-4 шага.",
     },
     "sd15": {
         "id": "runwayml/stable-diffusion-v1-5",
         "name": "🖼 Stable Diffusion 1.5",
-        "desc": "Классика. Самая лёгкая и быстрая, но менее детальная.",
+        "desc": "Классика. Быстрая, менее детальная.",
     },
 }
 
@@ -73,7 +74,14 @@ DEFAULT_HF_MODEL = "sdxl"
 MAX_SAVED_ANSWER_LEN = 800
 TIMEOUT = 600
 
+# === ЧАСОВОЙ ПОЯС ===
 TIMEZONE = "Europe/Moscow"
+TZ = ZoneInfo(TIMEZONE)
+
+def now_local():
+    """Текущее время в Москве без tzinfo (naive). Использовать везде вместо datetime.now()."""
+    return datetime.now(TZ).replace(tzinfo=None)
+
 WEEKDAYS_RU = {0: "Пн", 1: "Вт", 2: "Ср", 3: "Чт", 4: "Пт", 5: "Сб", 6: "Вс"}
 WEEKDAYS_MAP = {
     "mon": 0, "tue": 1, "wed": 2, "thu": 3, "fri": 4, "sat": 5, "sun": 6,
@@ -107,7 +115,6 @@ IMAGE_FORMATS = {
 
 scheduler = BackgroundScheduler(timezone=TIMEZONE)
 
-# === Помощники: безопасно достаём данные из словарей ===
 def hf_model_info(model_id):
     return HF_MODELS.get(model_id) or HF_MODELS[DEFAULT_HF_MODEL]
 
@@ -117,7 +124,6 @@ def model_info(model_id):
 def format_info(fmt_id):
     return IMAGE_FORMATS.get(fmt_id) or IMAGE_FORMATS[DEFAULT_FORMAT]
 
-# === БД ===
 def get_db_user(chat_id):
     db = SessionLocal()
     user = db.query(User).filter(User.telegram_id == chat_id).first()
@@ -128,7 +134,6 @@ def get_db_user(chat_id):
         db.refresh(user)
     return user, db
 
-# === Клавиатура ===
 def get_main_keyboard():
     markup = ReplyKeyboardMarkup(row_width=2, resize_keyboard=True)
     markup.add(
@@ -140,7 +145,6 @@ def get_main_keyboard():
     )
     return markup
 
-# === История ===
 def get_history(chat_id):
     if chat_id not in chat_history:
         chat_history[chat_id] = []
@@ -169,7 +173,6 @@ def update_history(chat_id, role, content):
 def clear_history(chat_id):
     chat_history[chat_id] = []
 
-# === Форматирование ===
 def format_plain_text(text):
     escaped = html.escape(text, quote=False)
     return re.sub(r'`([^`\n]+)`', r'<code>\1</code>', escaped)
@@ -564,7 +567,7 @@ def callback_task_done(call):
         db.close()
         return
 
-    task.last_completed = datetime.now()
+    task.last_completed = now_local()
     if task.task_type in ("daily", "weekly"):
         task.streak = (task.streak or 0) + 1
         task.reminder_sent = None
@@ -573,7 +576,6 @@ def callback_task_done(call):
         task.is_active = False
         streak_msg = ""
 
-    # XP за выполнение
     xp_for_task = 10 if task.task_type == "one_time" else 5
     user.xp += xp_for_task
     xp_needed = int(100 * (1.5 ** user.level))
@@ -640,7 +642,6 @@ def send_welcome(message):
     chat_id = message.chat.id
     clear_history(chat_id)
     user, db = get_db_user(chat_id)
-
     model_name = model_info(user.model)["name"]
     hf_model_name = hf_model_info(user.hf_model)["name"]
     format_name = format_info(user.format)["name"]
@@ -767,7 +768,7 @@ def generate_image(message):
         elif "429" in error_str:
             bot.reply_to(message, "⏳ Слишком много запросов. Подожди минуту.", reply_markup=get_main_keyboard())
         elif "402" in error_str or "Payment Required" in error_str:
-            bot.reply_to(message, "💳 Лимиты закончились. Смени модель в 🎨 Модель картинок.", reply_markup=get_main_keyboard())
+            bot.reply_to(message, "💳 Лимиты закончились. Смени модель.", reply_markup=get_main_keyboard())
         else:
             bot.reply_to(message, f"❌ Ошибка: {error_str[:200]}", reply_markup=get_main_keyboard())
 
@@ -784,14 +785,14 @@ def reply_text(message):
 
     user, db = get_db_user(chat_id)
 
-    now = datetime.now()
+    now = now_local()
     today_str = now.strftime("%Y-%m-%d")
     weekday_str = WEEKDAYS_RU[now.weekday()]
     time_str = now.strftime("%H:%M")
 
     system_prompt = (
         "Ты — полезный ассистент. Отвечай кратко и по делу.\n\n"
-        f"Сегодня: {today_str} ({weekday_str}), сейчас {time_str}.\n\n"
+        f"Сегодня: {today_str} ({weekday_str}), сейчас {time_str} (по Москве).\n\n"
         "Дополнительно веди учёт:\n"
         "- Пользователь сделал что-то полезное → xp (5-100).\n"
         "- Упомянул трату/доход → money (минус для трат), category.\n"
@@ -906,7 +907,7 @@ def reply_text(message):
                         if t_date and t_time:
                             stored_time = f"{t_date} {t_time}"
                         elif t_time:
-                            stored_time = f"{datetime.now().strftime('%Y-%m-%d')} {t_time}"
+                            stored_time = f"{now.strftime('%Y-%m-%d')} {t_time}"
 
                     if t_type == "weekly" and t_days:
                         days_list = []
@@ -1043,7 +1044,7 @@ def send_task_reminder(task, user):
 def check_tasks():
     db = SessionLocal()
     try:
-        now = datetime.now()
+        now = now_local()
         now_min = now.replace(second=0, microsecond=0)
         current_weekday = now.weekday()
 
@@ -1108,7 +1109,6 @@ def check_tasks():
                     send_task_reminder(task, user)
                     task.reminder_sent = marker
 
-                    # сброс streak при пропуске
                     if task.task_type in ("daily", "weekly") and task.last_completed:
                         days_since = (now.date() - task.last_completed.date()).days
                         if task.task_type == "daily" and days_since > 1:
