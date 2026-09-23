@@ -32,9 +32,9 @@ API_KEY = os.environ.get("AI_API_KEY")
 HF_TOKEN = os.environ.get("HF_TOKEN")
 
 if not TOKEN:
-    raise ValueError("Не задан BOT_TOKEN в переменных окружения")
+    raise ValueError("Не задан BOT_TOKEN")
 if not API_KEY:
-    raise ValueError("Не задан AI_API_KEY в переменных окружения")
+    raise ValueError("Не задан AI_API_KEY")
 
 AI_URL = "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions"
 HEADERS = {
@@ -45,21 +45,9 @@ HEADERS = {
 hf_client = InferenceClient(token=HF_TOKEN) if HF_TOKEN else None
 
 HF_MODELS = {
-    "sdxl": {
-        "id": "stabilityai/stable-diffusion-xl-base-1.0",
-        "name": "🎨 SDXL Base 1.0",
-        "desc": "Мощная, стабильно бесплатная.",
-    },
-    "sdxl_turbo": {
-        "id": "stabilityai/sdxl-turbo",
-        "name": "⚡ SDXL Turbo",
-        "desc": "Быстрая, 1-4 шага.",
-    },
-    "sd15": {
-        "id": "runwayml/stable-diffusion-v1-5",
-        "name": "🖼 Stable Diffusion 1.5",
-        "desc": "Классика. Быстрая, менее детальная.",
-    },
+    "sdxl": {"id": "stabilityai/stable-diffusion-xl-base-1.0", "name": "🎨 SDXL Base 1.0", "desc": "Мощная, бесплатная."},
+    "sdxl_turbo": {"id": "stabilityai/sdxl-turbo", "name": "⚡ SDXL Turbo", "desc": "Быстрая, 1-4 шага."},
+    "sd15": {"id": "runwayml/stable-diffusion-v1-5", "name": "🖼 Stable Diffusion 1.5", "desc": "Классика, быстрая."},
 }
 
 bot = telebot.TeleBot(TOKEN)
@@ -90,16 +78,16 @@ WEEKDAYS_MAP = {
 chat_history = {}
 
 MODEL_INFO = {
-    "gemini-3.8-flash": {"name": "🌟 Gemini 3.8 Flash", "desc": "Самая умная Flash-модель."},
-    "gemini-3.7-flash": {"name": "⚡ Gemini 3.7 Flash", "desc": "Быстрая и мощная."},
-    "gemini-3.6-flash": {"name": "🚀 Gemini 3.6 Flash", "desc": "Надёжная рабочая лошадка."},
+    "gemini-3.8-flash": {"name": "🌟 Gemini 3.8 Flash", "desc": "Сложные задачи, рассуждения."},
+    "gemini-3.7-flash": {"name": "⚡ Gemini 3.7 Flash", "desc": "Кодинг, видео, агентные задачи."},
+    "gemini-3.6-flash": {"name": "🚀 Gemini 3.6 Flash", "desc": "Баланс скорости и качества."},
     "gemini-3.5-flash-lite": {"name": "🍃 Gemini 3.5 Flash-Lite", "desc": "Самая быстрая."},
 }
 
 THINKING_LEVELS = {
-    "low": "⚡ Быстрый (low)",
-    "medium": "🧠 Сбалансированный (medium)",
-    "high": "🔬 Глубокий (high)",
+    "low": "⚡ Быстрый",
+    "medium": "🧠 Сбалансированный",
+    "high": "🔬 Глубокий",
 }
 
 HISTORY_OPTIONS = [3, 6, 10, 20, 50]
@@ -107,30 +95,38 @@ TEMPERATURE_OPTIONS = [0.0, 0.3, 0.7, 1.0, 1.5]
 MAX_TOKENS_OPTIONS = [512, 1024, 2048, 4096, 8192]
 
 IMAGE_FORMATS = {
-    "square": {"name": "⬛ Квадрат (1:1)", "desc": "1024×1024.", "width": 1024, "height": 1024},
-    "wide": {"name": "🖼 Широкий (16:9)", "desc": "1344×768.", "width": 1344, "height": 768},
-    "portrait": {"name": "📱 Вертикальный (9:16)", "desc": "768×1344.", "width": 768, "height": 1344},
+    "square": {"name": "⬛ Квадрат 1:1", "desc": "1024×1024", "width": 1024, "height": 1024},
+    "wide": {"name": "🖼 Широкий 16:9", "desc": "1344×768", "width": 1344, "height": 768},
+    "portrait": {"name": "📱 Вертикальный 9:16", "desc": "768×1344", "width": 768, "height": 1344},
 }
 
 ACHIEVEMENTS = {
-    "first_task": {"name": "🎯 Первый шаг", "desc": "Выполнил первую задачу"},
-    "tasks_10": {"name": "💪 Трудяга", "desc": "Выполнил 10 задач"},
-    "tasks_50": {"name": "🔥 Машина", "desc": "Выполнил 50 задач"},
-    "streak_3": {"name": "🥉 Три дня подряд", "desc": "Streak 3 дня"},
-    "streak_7": {"name": "🥈 Неделя силы", "desc": "Streak 7 дней подряд"},
-    "streak_30": {"name": "🥇 Месяц дисциплины", "desc": "Streak 30 дней подряд"},
-    "level_5": {"name": "⭐ Опытный", "desc": "Достиг уровня 5"},
-    "level_10": {"name": "🌟 Ветеран", "desc": "Достиг уровня 10"},
-    "first_income": {"name": "💵 Первый доход", "desc": "Записал первый доход"},
-    "first_expense": {"name": "🛒 Первая трата", "desc": "Записал первую трату"},
-    "positive_balance": {"name": "🏦 В плюсе", "desc": "Баланс больше 1000"},
-    "week_warrior": {"name": "⚔️ Неделя воина", "desc": "10 задач за неделю"},
+    "first_task": {"name": "🎯 Первый шаг", "desc": "Первая задача"},
+    "tasks_10": {"name": "💪 Трудяга", "desc": "10 задач"},
+    "tasks_50": {"name": "🔥 Машина", "desc": "50 задач"},
+    "streak_3": {"name": "🥉 3 дня", "desc": "Streak 3"},
+    "streak_7": {"name": "🥈 Неделя", "desc": "Streak 7"},
+    "streak_30": {"name": "🥇 Месяц", "desc": "Streak 30"},
+    "level_5": {"name": "⭐ Опытный", "desc": "Уровень 5"},
+    "level_10": {"name": "🌟 Ветеран", "desc": "Уровень 10"},
+    "first_income": {"name": "💵 Доход", "desc": "Первый доход"},
+    "first_expense": {"name": "🛒 Трата", "desc": "Первая трата"},
+    "positive_balance": {"name": "🏦 В плюсе", "desc": "Баланс > 1000"},
+    "week_warrior": {"name": "⚔️ Воин", "desc": "10 задач за неделю"},
 }
 
 STREAK_BONUSES = {
     "streak_3": 20,
     "streak_7": 50,
     "streak_30": 300,
+}
+
+RESET_TITLES = {
+    "money": ("💰 Сброс финансов", "Баланс = 0, транзакции удалятся."),
+    "xp": ("✨ Сброс XP", "XP, уровень и история XP удалятся."),
+    "ach": ("🏆 Сброс достижений", "Все достижения удалятся."),
+    "tasks": ("📋 Удаление задач", "Все задачи будут удалены."),
+    "all": ("💣 Полный сброс", "Всё удалится: баланс, XP, достижения, задачи."),
 }
 
 scheduler = BackgroundScheduler(timezone=TIMEZONE)
@@ -165,7 +161,7 @@ def add_xp(user, amount, source, db):
         user.xp -= xp_needed
         user.level += 1
         xp_needed = int(100 * (1.5 ** user.level))
-        level_up_msg = f"🎉 Уровень повышен! Теперь Level {user.level}!"
+        level_up_msg = f"🎉 Level {user.level}!"
     return level_up_msg
 
 def unlock_achievement(user, code, db):
@@ -224,23 +220,14 @@ def check_money_achievements(user, money_change, db):
 def format_achievements_msg(codes, user):
     if not codes:
         return "", 0
-    lines = ["\n\n🏆 **Новые достижения:**"]
-    bonus_xp = 0
-    for code in codes:
-        info = ACHIEVEMENTS.get(code, {})
-        lines.append(f"• {info.get('name', code)} — {info.get('desc', '')}")
-        if code in STREAK_BONUSES:
-            bonus_xp += STREAK_BONUSES[code]
+    lines = ["\n🏆 " + ", ".join(ACHIEVEMENTS.get(c, {}).get("name", c) for c in codes)]
+    bonus_xp = sum(STREAK_BONUSES.get(c, 0) for c in codes)
     if bonus_xp > 0:
-        lines.append(f"\n🎁 Бонус за streak: +{bonus_xp} XP")
+        lines.append(f"🎁 Бонус: +{bonus_xp} XP")
     return "\n".join(lines), bonus_xp
 
-# === ФИНАНСОВАЯ СВОДКА ДЛЯ ПРОМПТА ===
 def get_finance_summary(user, db):
-    """Краткая сводка финансов за 7 дней + баланс + топ-5 категорий."""
     week_ago = now_local() - timedelta(days=7)
-
-    # Расходы за неделю по категориям
     expenses = db.query(
         Transaction.category,
         func.sum(Transaction.amount).label("total"),
@@ -251,14 +238,12 @@ def get_finance_summary(user, db):
         Transaction.date >= week_ago
     ).group_by(Transaction.category).order_by(func.sum(Transaction.amount)).all()
 
-    # Доход за неделю
     income = db.query(func.sum(Transaction.amount)).filter(
         Transaction.user_id == user.id,
         Transaction.amount > 0,
         Transaction.date >= week_ago
     ).scalar() or 0
 
-    # Всего трат за неделю
     total_expense = db.query(func.sum(Transaction.amount)).filter(
         Transaction.user_id == user.id,
         Transaction.amount < 0,
@@ -274,12 +259,11 @@ def get_finance_summary(user, db):
     if expenses:
         cat_lines = []
         for cat, total, cnt in expenses[:5]:
-            cat_lines.append(f"  {cat}: {total:.0f} ({cnt} шт)")
-        parts.append("Топ-5 категорий расходов (7 дней):\n" + "\n".join(cat_lines))
+            cat_lines.append(f"  {cat}: {total:.0f} ({cnt})")
+        parts.append("Расходы по категориям (7 дней):\n" + "\n".join(cat_lines))
     else:
         parts.append("Транзакций за неделю нет.")
 
-    # Задачи и уровень
     active_tasks = db.query(Task).filter(Task.user_id == user.id, Task.is_active == True).count()
     parts.append(f"Активных задач: {active_tasks}")
     xp_needed = int(100 * (1.5 ** user.level))
@@ -287,9 +271,7 @@ def get_finance_summary(user, db):
 
     return "\n".join(parts)
 
-# === ВЫПОЛНЕНИЕ QUERY ОТ GEMINI ===
 def execute_query(user, db, query):
-    """Выполняет запрос Gemini к БД и возвращает результат в виде словаря."""
     try:
         qtype = query.get("type")
         period = query.get("period", "week")
@@ -374,12 +356,11 @@ def execute_query(user, db, query):
                 "top": [{"category": c, "total": round(float(t), 2), "count": n} for c, t, n in rows]
             }
 
-        return {"error": f"Неизвестный тип запроса: {qtype}"}
+        return {"error": f"Неизвестный тип: {qtype}"}
     except Exception as e:
         print(f"Ошибка execute_query: {e}", flush=True)
         return {"error": str(e)}
 
-# === Клавиатура ===
 def get_main_keyboard():
     markup = ReplyKeyboardMarkup(row_width=2, resize_keyboard=True)
     markup.add(
@@ -388,7 +369,8 @@ def get_main_keyboard():
         KeyboardButton("🧠 Модели"), KeyboardButton("⚙️ Настройки"),
         KeyboardButton("🎨 Нарисовать"), KeyboardButton("🎨 Модель картинок"),
         KeyboardButton("📐 Формат"), KeyboardButton("🔄 Сбросить историю"),
-        KeyboardButton("ℹ️ Помощь"), KeyboardButton("📊 Статус"),
+        KeyboardButton("🗑 Сброс статистики"), KeyboardButton("ℹ️ Помощь"),
+        KeyboardButton("📊 Статус"),
     )
     return markup
 
@@ -413,7 +395,7 @@ def update_history(chat_id, role, content):
     if history and history[-1]["role"] == role and history[-1]["content"] == content:
         return
     if role == "assistant" and len(content) > MAX_SAVED_ANSWER_LEN:
-        content = content[:MAX_SAVED_ANSWER_LEN] + "... (обрезано)"
+        content = content[:MAX_SAVED_ANSWER_LEN] + "..."
     history.append({"role": role, "content": content})
     trim_history(chat_id)
 
@@ -492,7 +474,7 @@ def send_long_message(chat_id, text, reply_to_message_id=None):
             else:
                 bot.send_message(chat_id, html_chunk, parse_mode='HTML')
         except Exception as e:
-            print(f"⚠️ HTML не прошёл: {e}", flush=True)
+            print(f"⚠️ HTML fallback: {e}", flush=True)
             if i == 0:
                 bot.send_message(chat_id, chunk, reply_to_message_id=reply_to_message_id)
             else:
@@ -506,7 +488,7 @@ def translate_to_english(text):
             "model": "gemini-3.5-flash-lite",
             "messages": [{
                 "role": "user",
-                "content": f"Translate the following text to English. Output ONLY the English translation: {text}"
+                "content": f"Translate to English. Output ONLY the translation: {text}"
             }],
             "max_tokens": 300,
             "temperature": 0.1
@@ -521,7 +503,7 @@ def translate_to_english(text):
         print(f"⚠️ Ошибка перевода: {e}", flush=True)
     return text
 
-# === МЕНЮ ФОРМАТОВ ===
+# === ФОРМАТ ===
 def build_formats_keyboard(chat_id):
     user, db = get_db_user(chat_id)
     current = user.format
@@ -534,7 +516,7 @@ def build_formats_keyboard(chat_id):
 
 @bot.message_handler(commands=['format'])
 def show_formats(message):
-    bot.send_message(message.chat.id, "📐 *Выбери формат:*", reply_markup=build_formats_keyboard(message.chat.id), parse_mode="Markdown")
+    bot.send_message(message.chat.id, "📐 Формат:", reply_markup=build_formats_keyboard(message.chat.id))
 
 @bot.callback_query_handler(func=lambda call: call.data.startswith('set_format:'))
 def callback_set_format(call):
@@ -545,10 +527,10 @@ def callback_set_format(call):
     db.commit()
     db.close()
     info = format_info(fmt_id)
-    bot.answer_callback_query(call.id, f"Формат: {info['name']}")
-    bot.edit_message_text(chat_id=chat_id, message_id=call.message.message_id, text=f"✅ Формат: *{info['name']}*\n\n{info['desc']}", parse_mode="Markdown")
+    bot.answer_callback_query(call.id, info['name'])
+    bot.edit_message_text(chat_id=chat_id, message_id=call.message.message_id, text=f"✅ {info['name']}")
 
-# === МЕНЮ МОДЕЛЕЙ HF ===
+# === HF MODELS ===
 def build_hf_models_keyboard(chat_id):
     user, db = get_db_user(chat_id)
     current = user.hf_model
@@ -561,7 +543,7 @@ def build_hf_models_keyboard(chat_id):
 
 @bot.message_handler(commands=['image_models'])
 def show_hf_models(message):
-    bot.send_message(message.chat.id, "🎨 *Выбери модель для генерации:*", reply_markup=build_hf_models_keyboard(message.chat.id), parse_mode="Markdown")
+    bot.send_message(message.chat.id, "🎨 Модель генерации:", reply_markup=build_hf_models_keyboard(message.chat.id))
 
 @bot.callback_query_handler(func=lambda call: call.data.startswith('set_hf_model:'))
 def callback_set_hf_model(call):
@@ -572,10 +554,10 @@ def callback_set_hf_model(call):
     db.commit()
     db.close()
     info = hf_model_info(model_id)
-    bot.answer_callback_query(call.id, f"Выбрана: {info['name']}")
-    bot.edit_message_text(chat_id=chat_id, message_id=call.message.message_id, text=f"✅ Модель: *{info['name']}*\n\n{info['desc']}", parse_mode="Markdown")
+    bot.answer_callback_query(call.id, info['name'])
+    bot.edit_message_text(chat_id=chat_id, message_id=call.message.message_id, text=f"✅ {info['name']}")
 
-# === МЕНЮ МОДЕЛЕЙ GEMINI ===
+# === GEMINI MODELS ===
 def build_models_keyboard(chat_id):
     user, db = get_db_user(chat_id)
     current_model = user.model
@@ -588,7 +570,7 @@ def build_models_keyboard(chat_id):
 
 @bot.message_handler(commands=['models'])
 def show_models(message):
-    bot.send_message(message.chat.id, "🧠 *Выбери модель:*", reply_markup=build_models_keyboard(message.chat.id), parse_mode="Markdown")
+    bot.send_message(message.chat.id, "🧠 Модель:", reply_markup=build_models_keyboard(message.chat.id))
 
 @bot.callback_query_handler(func=lambda call: call.data.startswith('model:'))
 def callback_model_info(call):
@@ -596,12 +578,12 @@ def callback_model_info(call):
     model_id = call.data.split(':', 1)[1]
     info = MODEL_INFO.get(model_id)
     if not info:
-        bot.answer_callback_query(call.id, "Модель не найдена")
+        bot.answer_callback_query(call.id, "Не найдено")
         return
     markup = InlineKeyboardMarkup(row_width=1)
-    markup.add(InlineKeyboardButton("✅ Выбрать эту модель", callback_data=f"confirm_model:{model_id}"))
+    markup.add(InlineKeyboardButton("✅ Выбрать", callback_data=f"confirm_model:{model_id}"))
     markup.add(InlineKeyboardButton("⬅️ Назад", callback_data="back_to_models"))
-    bot.edit_message_text(chat_id=chat_id, message_id=call.message.message_id, text=f"*{info['name']}*\n\n{info['desc']}\n\nВыбрать?", reply_markup=markup, parse_mode="Markdown")
+    bot.edit_message_text(chat_id=chat_id, message_id=call.message.message_id, text=f"*{info['name']}*\n{info['desc']}", reply_markup=markup, parse_mode="Markdown")
     bot.answer_callback_query(call.id)
 
 @bot.callback_query_handler(func=lambda call: call.data.startswith('confirm_model:'))
@@ -611,47 +593,30 @@ def callback_confirm_model(call):
     user, db = get_db_user(chat_id)
     user.model = model_id
     db.commit()
-    current_thinking = user.thinking
     db.close()
-    markup = InlineKeyboardMarkup(row_width=1)
-    for level_id, level_name in THINKING_LEVELS.items():
-        check = " ✅" if level_id == current_thinking else ""
-        markup.add(InlineKeyboardButton(text=f"{level_name}{check}", callback_data=f"thinking:{level_id}"))
-    bot.edit_message_text(chat_id=chat_id, message_id=call.message.message_id, text=f"Модель *{model_info(model_id)['name']}* выбрана!\n\nТеперь выбери *режим размышлений*:", reply_markup=markup, parse_mode="Markdown")
-    bot.answer_callback_query(call.id, "Модель выбрана!")
-
-@bot.callback_query_handler(func=lambda call: call.data.startswith('thinking:'))
-def callback_thinking(call):
-    chat_id = call.message.chat.id
-    level = call.data.split(':', 1)[1]
-    user, db = get_db_user(chat_id)
-    user.thinking = level
-    model_id = user.model
-    db.commit()
-    db.close()
-    bot.edit_message_text(chat_id=chat_id, message_id=call.message.message_id, text=f"✅ *Сохранено!*\n\n🧠 Модель: {model_info(model_id)['name']}\n⚙️ Режим: {THINKING_LEVELS[level]}", parse_mode="Markdown")
-    bot.answer_callback_query(call.id, "Сохранено!")
+    bot.edit_message_text(chat_id=chat_id, message_id=call.message.message_id, text=f"✅ {model_info(model_id)['name']}")
+    bot.answer_callback_query(call.id)
 
 @bot.callback_query_handler(func=lambda call: call.data == 'back_to_models')
 def callback_back(call):
     chat_id = call.message.chat.id
-    bot.edit_message_text(chat_id=chat_id, message_id=call.message.message_id, text="🧠 *Выбери модель:*", reply_markup=build_models_keyboard(chat_id), parse_mode="Markdown")
+    bot.edit_message_text(chat_id=chat_id, message_id=call.message.message_id, text="🧠 Модель:", reply_markup=build_models_keyboard(chat_id))
     bot.answer_callback_query(call.id)
 
 # === НАСТРОЙКИ ===
 def build_settings_keyboard(chat_id):
     user, db = get_db_user(chat_id)
     markup = InlineKeyboardMarkup(row_width=1)
-    markup.add(InlineKeyboardButton(text=f"📏 Длина контекста: {user.history_len}", callback_data="settings:history"))
+    markup.add(InlineKeyboardButton(text=f"📏 Контекст: {user.history_len}", callback_data="settings:history"))
     markup.add(InlineKeyboardButton(text=f"🎲 Температура: {user.temperature}", callback_data="settings:temperature"))
-    markup.add(InlineKeyboardButton(text=f"📝 Макс. токенов: {user.max_tokens}", callback_data="settings:max_tokens"))
-    markup.add(InlineKeyboardButton(text="🔄 Сбросить по умолчанию", callback_data="settings:reset"))
+    markup.add(InlineKeyboardButton(text=f"📝 Токенов: {user.max_tokens}", callback_data="settings:max_tokens"))
+    markup.add(InlineKeyboardButton(text="🔄 По умолчанию", callback_data="settings:reset"))
     db.close()
     return markup
 
 @bot.message_handler(commands=['settings'])
 def show_settings(message):
-    bot.send_message(message.chat.id, "⚙️ *Настройки контекста*", reply_markup=build_settings_keyboard(message.chat.id), parse_mode="Markdown")
+    bot.send_message(message.chat.id, "⚙️ Настройки:", reply_markup=build_settings_keyboard(message.chat.id))
 
 @bot.callback_query_handler(func=lambda call: call.data.startswith('settings:'))
 def callback_settings(call):
@@ -664,34 +629,34 @@ def callback_settings(call):
         markup = InlineKeyboardMarkup(row_width=1)
         for opt in HISTORY_OPTIONS:
             check = " ✅" if opt == current else ""
-            markup.add(InlineKeyboardButton(text=f"{opt} сообщений{check}", callback_data=f"set_history:{opt}"))
+            markup.add(InlineKeyboardButton(text=f"{opt}{check}", callback_data=f"set_history:{opt}"))
         markup.add(InlineKeyboardButton("⬅️ Назад", callback_data="settings:back"))
-        bot.edit_message_text(chat_id=chat_id, message_id=call.message.message_id, text="📏 *Выбери длину контекста:*", reply_markup=markup, parse_mode="Markdown")
+        bot.edit_message_text(chat_id=chat_id, message_id=call.message.message_id, text="📏 Контекст:", reply_markup=markup)
     elif action == "temperature":
         current = user.temperature
         markup = InlineKeyboardMarkup(row_width=1)
-        labels = {0.0: "0.0 — Строго", 0.3: "0.3 — Умеренно", 0.7: "0.7 — Баланс", 1.0: "1.0 — Креативно", 1.5: "1.5 — Максимум"}
+        labels = {0.0: "0.0 — строго", 0.3: "0.3", 0.7: "0.7 — баланс", 1.0: "1.0 — креативно", 1.5: "1.5 — макс"}
         for opt in TEMPERATURE_OPTIONS:
             check = " ✅" if opt == current else ""
             markup.add(InlineKeyboardButton(text=f"{labels[opt]}{check}", callback_data=f"set_temperature:{opt}"))
         markup.add(InlineKeyboardButton("⬅️ Назад", callback_data="settings:back"))
-        bot.edit_message_text(chat_id=chat_id, message_id=call.message.message_id, text="🎲 *Выбери температуру:*", reply_markup=markup, parse_mode="Markdown")
+        bot.edit_message_text(chat_id=chat_id, message_id=call.message.message_id, text="🎲 Температура:", reply_markup=markup)
     elif action == "max_tokens":
         current = user.max_tokens
         markup = InlineKeyboardMarkup(row_width=1)
         for opt in MAX_TOKENS_OPTIONS:
             check = " ✅" if opt == current else ""
-            markup.add(InlineKeyboardButton(text=f"{opt} токенов{check}", callback_data=f"set_tokens:{opt}"))
+            markup.add(InlineKeyboardButton(text=f"{opt}{check}", callback_data=f"set_tokens:{opt}"))
         markup.add(InlineKeyboardButton("⬅️ Назад", callback_data="settings:back"))
-        bot.edit_message_text(chat_id=chat_id, message_id=call.message.message_id, text="📝 *Выбери макс. длину ответа:*", reply_markup=markup, parse_mode="Markdown")
+        bot.edit_message_text(chat_id=chat_id, message_id=call.message.message_id, text="📝 Макс. токенов:", reply_markup=markup)
     elif action == "reset":
         user.history_len = DEFAULT_HISTORY_LEN
         user.temperature = DEFAULT_TEMPERATURE
         user.max_tokens = DEFAULT_MAX_TOKENS
         db.commit()
-        bot.edit_message_text(chat_id=chat_id, message_id=call.message.message_id, text="✅ *Сброшено!*", reply_markup=build_settings_keyboard(chat_id), parse_mode="Markdown")
+        bot.edit_message_text(chat_id=chat_id, message_id=call.message.message_id, text="✅ Сброшено", reply_markup=build_settings_keyboard(chat_id))
     elif action == "back":
-        bot.edit_message_text(chat_id=chat_id, message_id=call.message.message_id, text="⚙️ *Настройки контекста*", reply_markup=build_settings_keyboard(chat_id), parse_mode="Markdown")
+        bot.edit_message_text(chat_id=chat_id, message_id=call.message.message_id, text="⚙️ Настройки:", reply_markup=build_settings_keyboard(chat_id))
 
     db.close()
     bot.answer_callback_query(call.id)
@@ -705,7 +670,7 @@ def callback_set_history(call):
     db.commit()
     db.close()
     trim_history(chat_id)
-    bot.edit_message_text(chat_id=chat_id, message_id=call.message.message_id, text="⚙️ *Настройки*", reply_markup=build_settings_keyboard(chat_id), parse_mode="Markdown")
+    bot.edit_message_text(chat_id=chat_id, message_id=call.message.message_id, text="⚙️ Настройки:", reply_markup=build_settings_keyboard(chat_id))
     bot.answer_callback_query(call.id, f"Контекст: {val}")
 
 @bot.callback_query_handler(func=lambda call: call.data.startswith('set_temperature:'))
@@ -716,7 +681,7 @@ def callback_set_temp(call):
     user.temperature = val
     db.commit()
     db.close()
-    bot.edit_message_text(chat_id=chat_id, message_id=call.message.message_id, text="⚙️ *Настройки*", reply_markup=build_settings_keyboard(chat_id), parse_mode="Markdown")
+    bot.edit_message_text(chat_id=chat_id, message_id=call.message.message_id, text="⚙️ Настройки:", reply_markup=build_settings_keyboard(chat_id))
     bot.answer_callback_query(call.id, f"Температура: {val}")
 
 @bot.callback_query_handler(func=lambda call: call.data.startswith('set_tokens:'))
@@ -727,8 +692,8 @@ def callback_set_tokens(call):
     user.max_tokens = val
     db.commit()
     db.close()
-    bot.edit_message_text(chat_id=chat_id, message_id=call.message.message_id, text="⚙️ *Настройки*", reply_markup=build_settings_keyboard(chat_id), parse_mode="Markdown")
-    bot.answer_callback_query(call.id, f"Макс. токенов: {val}")
+    bot.edit_message_text(chat_id=chat_id, message_id=call.message.message_id, text="⚙️ Настройки:", reply_markup=build_settings_keyboard(chat_id))
+    bot.answer_callback_query(call.id, f"Токенов: {val}")
 
 # === ПРОФИЛЬ ===
 @bot.message_handler(commands=['profile'])
@@ -738,12 +703,11 @@ def profile_command(message):
     xp_needed = int(100 * (1.5 ** user.level))
     ach_count = db.query(Achievement).filter(Achievement.user_id == user.id).count()
     text = (
-        f"👤 **Профиль**\n\n"
+        f"👤 **Профиль**\n"
         f"🏆 Уровень: {user.level}\n"
-        f"✨ XP: {user.xp} / {xp_needed}\n"
+        f"✨ XP: {user.xp}/{xp_needed}\n"
         f"💰 Баланс: {user.balance:.2f}\n"
-        f"🏅 Достижений: {ach_count}/{len(ACHIEVEMENTS)}\n\n"
-        f"📊 Прогресс: {user.xp}/{xp_needed}"
+        f"🏅 Достижения: {ach_count}/{len(ACHIEVEMENTS)}"
     )
     bot.reply_to(message, text, parse_mode="Markdown")
     db.close()
@@ -754,20 +718,18 @@ def achievements_command(message):
     chat_id = message.chat.id
     user, db = get_db_user(chat_id)
     unlocked = {a.code for a in db.query(Achievement).filter(Achievement.user_id == user.id).all()}
-    lines = [f"🏆 **Достижения** ({len(unlocked)}/{len(ACHIEVEMENTS)})\n"]
+    lines = [f"🏆 Достижения ({len(unlocked)}/{len(ACHIEVEMENTS)})\n"]
     for code, info in ACHIEVEMENTS.items():
-        if code in unlocked:
-            lines.append(f"✅ {info['name']} — {info['desc']}")
-        else:
-            lines.append(f"🔒 {info['name']} — {info['desc']}")
-    bot.reply_to(message, "\n".join(lines), parse_mode="Markdown", reply_markup=get_main_keyboard())
+        mark = "✅" if code in unlocked else "🔒"
+        lines.append(f"{mark} {info['name']} — {info['desc']}")
+    bot.reply_to(message, "\n".join(lines), reply_markup=get_main_keyboard())
     db.close()
 
 @bot.message_handler(func=lambda m: m.text == "🏆 Достижения")
 def achievements_button(message):
     achievements_command(message)
 
-# === НЕДЕЛЬНАЯ СТАТИСТИКА ===
+# === НЕДЕЛЯ ===
 @bot.message_handler(commands=['week'])
 def week_command(message):
     chat_id = message.chat.id
@@ -801,16 +763,16 @@ def week_command(message):
     ).count()
 
     lines = [
-        "📊 **Статистика за 7 дней:**\n",
-        f"✨ XP заработано: **{xp_total}**",
-        f"✅ Задач выполнено: **{tasks_done}**",
+        "📊 **7 дней**\n",
+        f"✨ XP: **{xp_total}**",
+        f"✅ Задач: **{tasks_done}**",
         f"💰 Доход: **+{money_in:.0f}**",
         f"💸 Расход: **{money_out:.0f}**",
         f"📈 Итог: **{money_in + money_out:+.0f}**",
         f"🏆 Достижений: **{ach_week}**",
     ]
     if top_cats:
-        lines.append("\n**Топ категорий расходов:**")
+        lines.append("\n**Топ расходов:**")
         for cat, total in top_cats:
             lines.append(f"• {cat}: {total:.0f}")
 
@@ -820,6 +782,109 @@ def week_command(message):
 @bot.message_handler(func=lambda m: m.text == "📊 Неделя")
 def week_button(message):
     week_command(message)
+
+# === СБРОС СТАТИСТИКИ ===
+def build_reset_menu_keyboard():
+    markup = InlineKeyboardMarkup(row_width=1)
+    markup.add(InlineKeyboardButton("💰 Финансы", callback_data="rstats:money"))
+    markup.add(InlineKeyboardButton("✨ XP и уровень", callback_data="rstats:xp"))
+    markup.add(InlineKeyboardButton("🏆 Достижения", callback_data="rstats:ach"))
+    markup.add(InlineKeyboardButton("📋 Задачи", callback_data="rstats:tasks"))
+    markup.add(InlineKeyboardButton("💣 Всё", callback_data="rstats:all"))
+    markup.add(InlineKeyboardButton("❌ Отмена", callback_data="rstats:cancel"))
+    return markup
+
+def build_reset_confirm_keyboard(action):
+    markup = InlineKeyboardMarkup(row_width=2)
+    markup.add(
+        InlineKeyboardButton("✅ Да", callback_data=f"rstats:do:{action}"),
+        InlineKeyboardButton("❌ Нет", callback_data="rstats:menu"),
+    )
+    return markup
+
+@bot.message_handler(commands=['reset_stats'])
+def reset_stats_command(message):
+    bot.send_message(message.chat.id, "🗑 Что сбросить?", reply_markup=build_reset_menu_keyboard())
+
+@bot.message_handler(func=lambda m: m.text == "🗑 Сброс статистики")
+def reset_stats_button(message):
+    reset_stats_command(message)
+
+@bot.callback_query_handler(func=lambda call: call.data == 'rstats:menu')
+def cb_rstats_menu(call):
+    try:
+        bot.edit_message_text(chat_id=call.message.chat.id, message_id=call.message.message_id, text="🗑 Что сбросить?", reply_markup=build_reset_menu_keyboard())
+    except Exception:
+        pass
+    bot.answer_callback_query(call.id)
+
+@bot.callback_query_handler(func=lambda call: call.data == 'rstats:cancel')
+def cb_rstats_cancel(call):
+    try:
+        bot.edit_message_text(chat_id=call.message.chat.id, message_id=call.message.message_id, text="❌ Отменено")
+    except Exception:
+        pass
+    bot.answer_callback_query(call.id, "Отменено")
+
+@bot.callback_query_handler(func=lambda call: call.data in ('rstats:money', 'rstats:xp', 'rstats:ach', 'rstats:tasks', 'rstats:all'))
+def cb_rstats_confirm(call):
+    action = call.data.split(':', 1)[1]
+    title, desc = RESET_TITLES.get(action, ("?", "?"))
+    try:
+        bot.edit_message_text(
+            chat_id=call.message.chat.id,
+            message_id=call.message.message_id,
+            text=f"⚠️ *{title}*\n{desc}\n\nТочно?",
+            parse_mode="Markdown",
+            reply_markup=build_reset_confirm_keyboard(action)
+        )
+    except Exception:
+        pass
+    bot.answer_callback_query(call.id)
+
+@bot.callback_query_handler(func=lambda call: call.data.startswith('rstats:do:'))
+def cb_rstats_do(call):
+    action = call.data.split(':', 2)[2]
+    chat_id = call.message.chat.id
+    user, db = get_db_user(chat_id)
+    try:
+        if action == "money":
+            db.query(Transaction).filter(Transaction.user_id == user.id).delete()
+            user.balance = 0.0
+            msg = "✅ Финансы сброшены"
+        elif action == "xp":
+            db.query(XPLog).filter(XPLog.user_id == user.id).delete()
+            user.xp = 0
+            user.level = 0
+            msg = "✅ XP сброшен"
+        elif action == "ach":
+            db.query(Achievement).filter(Achievement.user_id == user.id).delete()
+            msg = "✅ Достижения сброшены"
+        elif action == "tasks":
+            db.query(Task).filter(Task.user_id == user.id).delete()
+            msg = "✅ Задачи удалены"
+        elif action == "all":
+            db.query(Transaction).filter(Transaction.user_id == user.id).delete()
+            db.query(XPLog).filter(XPLog.user_id == user.id).delete()
+            db.query(Achievement).filter(Achievement.user_id == user.id).delete()
+            db.query(Task).filter(Task.user_id == user.id).delete()
+            user.xp = 0
+            user.level = 0
+            user.balance = 0.0
+            msg = "💣 Всё сброшено"
+        else:
+            msg = "❌ Неизвестное действие"
+        db.commit()
+    except Exception as e:
+        db.rollback()
+        msg = f"❌ Ошибка: {e}"
+    finally:
+        db.close()
+    try:
+        bot.edit_message_text(chat_id=chat_id, message_id=call.message.message_id, text=msg)
+    except Exception:
+        pass
+    bot.answer_callback_query(call.id, "Готово")
 
 # === ЗАДАЧИ ===
 def format_task_line(task, idx=None):
@@ -859,18 +924,18 @@ def tasks_command(message):
     tasks = get_active_tasks(user.id, db)
     if not tasks:
         bot.reply_to(message,
-            "📋 У тебя нет активных задач.\n\n"
-            "Просто напиши, например:\n"
-            "• «Завтра в 15:00 позвонить врачу» — разовая\n"
-            "• «Каждый день в 8:00 выпить воду» — ежедневная\n"
-            "• «Каждый Пн и Ср в 19:00 читать» — еженедельная",
+            "📋 Задач нет.\n\n"
+            "Примеры:\n"
+            "• «Завтра в 15:00 позвонить врачу»\n"
+            "• «Каждый день в 8:00 выпить воду»\n"
+            "• «Каждый Пн и Ср в 19:00 читать»",
             reply_markup=get_main_keyboard())
         db.close()
         return
-    lines = ["📋 **Твои задачи:**\n"]
+    lines = ["📋 **Задачи:**\n"]
     for i, t in enumerate(tasks, 1):
         lines.append(format_task_line(t, i))
-    lines.append("\n✅ <id> — выполнить, 🗑 <id> — удалить.")
+    lines.append("\n✅ <id> — выполнить, 🗑 <id> — удалить")
     bot.reply_to(message, "\n".join(lines), parse_mode="Markdown", reply_markup=build_tasks_keyboard(tasks))
     db.close()
 
@@ -885,7 +950,7 @@ def callback_task_done(call):
     user, db = get_db_user(chat_id)
     task = db.query(Task).filter(Task.id == task_id, Task.user_id == user.id).first()
     if not task:
-        bot.answer_callback_query(call.id, "Задача не найдена")
+        bot.answer_callback_query(call.id, "Не найдено")
         db.close()
         return
 
@@ -893,7 +958,7 @@ def callback_task_done(call):
     if task.task_type in ("daily", "weekly"):
         task.streak = (task.streak or 0) + 1
         task.reminder_sent = None
-        streak_msg = f" 🔥 Серия: {task.streak}"
+        streak_msg = f" 🔥{task.streak}"
     else:
         task.is_active = False
         streak_msg = ""
@@ -909,11 +974,11 @@ def callback_task_done(call):
         bonus_level_up = add_xp(user, bonus_xp, "streak_bonus", db)
 
     db.commit()
-    bot.answer_callback_query(call.id, "Выполнено! ✅")
+    bot.answer_callback_query(call.id, "✅")
 
     remaining = get_active_tasks(user.id, db)
     if remaining:
-        lines = ["📋 **Твои задачи:**\n"]
+        lines = ["📋 **Задачи:**\n"]
         for i, t in enumerate(remaining, 1):
             lines.append(format_task_line(t, i))
         try:
@@ -922,15 +987,15 @@ def callback_task_done(call):
             pass
     else:
         try:
-            bot.edit_message_text(chat_id=chat_id, message_id=call.message.message_id, text="🎉 Все задачи выполнены!")
+            bot.edit_message_text(chat_id=chat_id, message_id=call.message.message_id, text="🎉 Все задачи выполнены")
         except Exception:
             pass
 
-    msg = f"✅ Выполнено: {task.description}{streak_msg}\n✨ +{xp_for_task} XP"
+    msg = f"✅ {task.description}{streak_msg}\n+{xp_for_task} XP"
     if level_up:
-        msg += f"\n\n{level_up}"
+        msg += f"\n{level_up}"
     if bonus_level_up:
-        msg += f"\n\n{bonus_level_up}"
+        msg += f"\n{bonus_level_up}"
     if ach_msg:
         msg += ach_msg
     bot.send_message(chat_id, msg, parse_mode="Markdown")
@@ -943,15 +1008,15 @@ def callback_task_del(call):
     user, db = get_db_user(chat_id)
     task = db.query(Task).filter(Task.id == task_id, Task.user_id == user.id).first()
     if not task:
-        bot.answer_callback_query(call.id, "Задача не найдена")
+        bot.answer_callback_query(call.id, "Не найдено")
         db.close()
         return
     task.is_active = False
     db.commit()
-    bot.answer_callback_query(call.id, "Удалено 🗑")
+    bot.answer_callback_query(call.id, "🗑")
     remaining = get_active_tasks(user.id, db)
     if remaining:
-        lines = ["📋 **Твои задачи:**\n"]
+        lines = ["📋 **Задачи:**\n"]
         for i, t in enumerate(remaining, 1):
             lines.append(format_task_line(t, i))
         try:
@@ -960,7 +1025,7 @@ def callback_task_del(call):
             pass
     else:
         try:
-            bot.edit_message_text(chat_id=chat_id, message_id=call.message.message_id, text="📋 Список пуст.")
+            bot.edit_message_text(chat_id=chat_id, message_id=call.message.message_id, text="📋 Пусто")
         except Exception:
             pass
     db.close()
@@ -970,43 +1035,22 @@ def callback_task_del(call):
 def send_welcome(message):
     chat_id = message.chat.id
     clear_history(chat_id)
-    user, db = get_db_user(chat_id)
-    model_name = model_info(user.model)["name"]
-    hf_model_name = hf_model_info(user.hf_model)["name"]
-    format_name = format_info(user.format)["name"]
-    db.close()
-
-    bot.send_message(chat_id,
-                     f"Привет! Я бот на нейросети Gemini.\n"
-                     f"🧠 Модель: {model_name}\n"
-                     f"🎨 Модель картинок: {hf_model_name}\n"
-                     f"📐 Формат: {format_name}\n"
-                     f"Умею: текст, фото, голосовые, картинки, задачи, RPG, финансы.\n"
-                     f"Спрашивай про траты и доходы в свободной форме — я вижу свою базу.",
-                     reply_markup=get_main_keyboard())
-
-@bot.message_handler(commands=['help'])
-def help_command(message):
-    help_text = (
-        "📚 Помощь:\n"
-        "• Отправь текст – отвечу.\n"
-        "• Отправь фото – опишу.\n"
-        "• Отправь голосовое – расшифрую.\n"
-        "• 🎨 /image <описание> – картинки.\n"
-        "• 📐 /format, 🧠 /models, ⚙️ /settings\n"
-        "• 👤 /profile – уровень, XP, баланс.\n"
-        "• 📋 /tasks – задачи.\n"
-        "• 🏆 /achievements – достижения.\n"
-        "• 📊 /week – статистика за 7 дней.\n\n"
-        "💰 **Финансы:**\n"
-        "Просто пиши «потратил 500 на еду» или «получил зарплату 50000».\n"
-        "Спрашивай: «сколько потратил на еду за месяц?», «куда уходят деньги?», «покажи последние 5 трат».\n\n"
-        "📝 **Задачи:**\n"
+    text = (
+        "👋 Привет! Я твой полезный ассистент.\n\n"
+        "**Что умею:**\n"
+        "• 💬 Отвечаю на вопросы, помогаю с текстом и кодом\n"
+        "• 🖼 Генерирую картинки — `/image кот в космосе`\n"
+        "• 🎤 Распознаю голосовые и описываю фото\n"
+        "• 📋 Веду задачи и напоминаю о них\n"
+        "• 💰 Записываю траты и доходы\n"
+        "• 🏆 Считаю XP, уровень и достижения\n\n"
+        "**Примеры:**\n"
         "• «Завтра в 15:00 позвонить врачу»\n"
         "• «Каждый день в 8:00 выпить воду»\n"
-        "• «Каждый Пн и Ср в 19:00 читать»"
+        "• «Потратил 500 на еду»\n\n"
+        "Полный список команд — `/help`"
     )
-    bot.reply_to(message, help_text, reply_markup=get_main_keyboard())
+    bot.send_message(chat_id, text, parse_mode="Markdown", reply_markup=get_main_keyboard())
 
 @bot.message_handler(commands=['stats'])
 def stats_command(message):
@@ -1015,16 +1059,15 @@ def stats_command(message):
     total_chars = sum(len(str(msg["content"])) for msg in history)
     user, db = get_db_user(chat_id)
     bot.reply_to(message,
-                 f"📊 *Статус:*\n\n"
-                 f"🧠 Модель: {model_info(user.model)['name']}\n"
-                 f"⚙️ Режим: {THINKING_LEVELS[user.thinking]}\n"
-                 f"📏 Контекст: {user.history_len}\n"
-                 f"🎲 Температура: {user.temperature}\n"
-                 f"📝 Макс. токенов: {user.max_tokens}\n"
-                 f"🎨 Картинки: {hf_model_info(user.hf_model)['name']}\n"
-                 f"📐 Формат: {format_info(user.format)['name']}\n\n"
-                 f"Сообщений в истории: {len(history)}\n"
-                 f"Размер: {total_chars} симв.",
+                 f"📊 **Статус**\n"
+                 f"🧠 {model_info(user.model)['name']}\n"
+                 f"⚙️ {THINKING_LEVELS[user.thinking]}\n"
+                 f"📏 {user.history_len}\n"
+                 f"🎲 {user.temperature}\n"
+                 f"📝 {user.max_tokens}\n"
+                 f"🎨 {hf_model_info(user.hf_model)['name']}\n"
+                 f"📐 {format_info(user.format)['name']}\n\n"
+                 f"История: {len(history)} сообщ., {total_chars} симв.",
                  reply_markup=get_main_keyboard(), parse_mode="Markdown")
     db.close()
 
@@ -1055,7 +1098,7 @@ def format_button(message):
 @bot.message_handler(func=lambda m: m.text == "🔄 Сбросить историю")
 def reset_button(message):
     clear_history(message.chat.id)
-    bot.reply_to(message, "✅ История очищена!", reply_markup=get_main_keyboard())
+    bot.reply_to(message, "✅ История очищена", reply_markup=get_main_keyboard())
 
 @bot.message_handler(func=lambda m: m.text == "ℹ️ Помощь")
 def help_button(message):
@@ -1071,7 +1114,7 @@ def generate_image(message):
     chat_id = message.chat.id
     prompt = message.text.replace('/image', '', 1).strip()
     if not prompt:
-        bot.reply_to(message, "🖼 Напиши: `/image кот в космосе`", parse_mode="Markdown")
+        bot.reply_to(message, "🖼 `/image кот в космосе`", parse_mode="Markdown")
         return
     if not hf_client:
         bot.reply_to(message, "❌ Не задан HF_TOKEN", reply_markup=get_main_keyboard())
@@ -1082,7 +1125,7 @@ def generate_image(message):
     fmt = format_info(user.format)
     db.close()
 
-    bot.send_message(chat_id, f"🎨 Генерирую ({info['name']})...\n15-30 секунд.")
+    bot.send_message(chat_id, f"🎨 Генерирую ({info['name']})...")
     english_prompt = translate_to_english(prompt)
 
     try:
@@ -1095,9 +1138,9 @@ def generate_image(message):
         error_str = str(e)
         print(f"Ошибка HF: {error_str}", flush=True)
         if "503" in error_str:
-            bot.reply_to(message, "⏳ Модель загружается. Попробуй через 20-30 сек.", reply_markup=get_main_keyboard())
+            bot.reply_to(message, "⏳ Модель загружается, попробуй через 20-30 сек.", reply_markup=get_main_keyboard())
         elif "429" in error_str:
-            bot.reply_to(message, "⏳ Слишком много запросов. Подожди минуту.", reply_markup=get_main_keyboard())
+            bot.reply_to(message, "⏳ Слишком много запросов, подожди минуту.", reply_markup=get_main_keyboard())
         elif "402" in error_str or "Payment Required" in error_str:
             bot.reply_to(message, "💳 Лимиты закончились. Смени модель.", reply_markup=get_main_keyboard())
         else:
@@ -1136,7 +1179,7 @@ def parse_gemini_json(raw_reply):
         return None
     return parsed
 
-# === ОБРАБОТКА ТЕКСТА (главный хендлер) ===
+# === ОБРАБОТКА ТЕКСТА ===
 @bot.message_handler(content_types=['text'])
 def reply_text(message):
     user_text = message.text
@@ -1157,34 +1200,18 @@ def reply_text(message):
     finance_summary = get_finance_summary(user, db)
 
     system_prompt = (
-        "Ты — полезный ассистент в Telegram. Отвечай кратко и по делу.\n\n"
-        f"Сегодня: {today_str} ({weekday_str}), сейчас {time_str} (МСК).\n\n"
-        "=== ТЕКУЩИЕ ДАННЫЕ ПОЛЬЗОВАТЕЛЯ ===\n"
-        f"{finance_summary}\n"
-        "=== КОНЕЦ ДАННЫХ ===\n\n"
-        "Дополнительно веди учёт:\n"
-        "- Пользователь сделал что-то полезное → xp (5-100).\n"
-        "- Упомянул трату/доход → money (минус для трат), category.\n"
-        "- Просит напоминание → task:\n"
-        "  • one_time: description, date (YYYY-MM-DD), time (HH:MM)\n"
-        "  • daily: description, time (HH:MM)\n"
-        "  • weekly: description, time (HH:MM), days (Mon,Wed)\n"
-        "- Обычный вопрос → xp=0, money=0, task=null, query=null.\n\n"
-        "=== ЕСЛИ НУЖНЫ ДЕТАЛЬНЫЕ ДАННЫЕ ===\n"
-        "Если вопрос требует точных данных из БД, которых НЕТ в сводке выше — "
-        "заполни поле 'query' (вместо выдумывания цифр):\n"
-        "{\n"
-        "  \"type\": \"expenses_by_category\" | \"income_by_category\" | \"recent_transactions\" | \"balance\" | \"top_categories\",\n"
-        "  \"category\": \"Еда\" (опционально),\n"
-        "  \"period\": \"week\" | \"month\" | \"all\",\n"
-        "  \"limit\": 10 (опционально)\n"
-        "}\n"
-        "После получения результата ты сформулируешь финальный ответ.\n\n"
-        "=== ФОРМАТ ОТВЕТА ===\n"
-        "Отвечай СТРОГО одним JSON (без markdown):\n"
+        "Ты — ассистент. Отвечай кратко.\n\n"
+        f"Дата: {today_str} ({weekday_str}), {time_str} МСК.\n\n"
+        f"Данные пользователя:\n{finance_summary}\n\n"
+        "Если есть данные — используй их. Если нет — заполни query.\n"
+        "Также распознавай:\n"
+        "- полезное действие → xp (5-100)\n"
+        "- трата/доход → money, category\n"
+        "- напоминание → task\n\n"
+        "Ответ — один JSON:\n"
         "{\"reply\": \"...\", \"xp\": 0, \"money\": 0, \"category\": \"\", \"task\": null, \"query\": null}\n\n"
         "task: {\"description\": \"...\", \"type\": \"one_time|daily|weekly\", \"date\": \"YYYY-MM-DD\", \"time\": \"HH:MM\", \"days\": \"Mon,Wed\"}\n"
-        "query: null или объект как выше."
+        "query: {\"type\": \"expenses_by_category|income_by_category|recent_transactions|balance|top_categories\", \"category\": \"...\", \"period\": \"week|month|all\", \"limit\": 10}"
     )
 
     clean_history = [m for m in get_history(chat_id) if m["role"] != "system"]
@@ -1201,20 +1228,17 @@ def reply_text(message):
                 update_history(chat_id, "assistant", raw_reply)
                 break
 
-            # === ОБРАБОТКА QUERY (второй запрос к Gemini) ===
             query = parsed.get("query")
             if query and isinstance(query, dict):
-                print(f"🔍 Query: {query}", flush=True)
+                print(f"🔍 {query}", flush=True)
                 query_result = execute_query(user, db, query)
-                print(f"📊 Query result: {str(query_result)[:300]}", flush=True)
+                print(f"📊 {str(query_result)[:300]}", flush=True)
 
                 second_messages = messages + [
                     {"role": "assistant", "content": raw_reply},
                     {"role": "user", "content": (
-                        f"Вот результат запроса к базе данных: {json.dumps(query_result, ensure_ascii=False, default=str)}\n\n"
-                        "Теперь сформулируй финальный ответ пользователю. "
-                        "Ответь ОДНИМ JSON того же формата: {\"reply\": \"...\", \"xp\": 0, \"money\": 0, \"category\": \"\", \"task\": null, \"query\": null}. "
-                        "query всегда null на этом шаге."
+                        f"Результат запроса: {json.dumps(query_result, ensure_ascii=False, default=str)}\n"
+                        "Сформулируй финальный ответ. JSON: {\"reply\": \"...\", \"xp\": 0, \"money\": 0, \"category\": \"\", \"task\": null, \"query\": null}"
                     )}
                 ]
                 raw_reply = call_gemini(second_messages, user.model, user.temperature, user.max_tokens)
@@ -1225,7 +1249,6 @@ def reply_text(message):
                     update_history(chat_id, "assistant", raw_reply)
                     break
 
-            # === ОБРАБОТКА РЕЗУЛЬТАТА ===
             reply_text_out = (
                 parsed.get("reply") or parsed.get("response") or parsed.get("message")
                 or parsed.get("text") or parsed.get("content")
@@ -1255,15 +1278,15 @@ def reply_text(message):
 
             if xp_gain > 0:
                 level_up = add_xp(user, xp_gain, "chat", db)
-                reply_text_out += f"\n\n✨ +{xp_gain} XP"
+                reply_text_out += f"\n\n+{xp_gain} XP"
                 if level_up:
-                    reply_text_out += f"\n\n{level_up}"
+                    reply_text_out += f"\n{level_up}"
 
             if money_change != 0:
                 user.balance += money_change
                 db.add(Transaction(user_id=user.id, amount=money_change, category=category, description=user_text[:50]))
                 sign = "+" if money_change > 0 else ""
-                reply_text_out += f"\n💰 Баланс: {sign}{money_change} ({category}). Текущий: {user.balance:.2f}"
+                reply_text_out += f"\n💰 {sign}{money_change} ({category}). Баланс: {user.balance:.2f}"
                 new_achievements.extend(check_money_achievements(user, money_change, db))
 
             if task_data and isinstance(task_data, dict):
@@ -1271,7 +1294,7 @@ def reply_text(message):
                     t_type = task_data.get("type", "one_time")
                     t_time = task_data.get("time")
                     t_days = task_data.get("days")
-                    t_desc = task_data.get("description", "Без названия")
+                    t_desc = task_data.get("description", "Задача")
 
                     stored_time = t_time
                     if t_type == "one_time":
@@ -1301,11 +1324,11 @@ def reply_text(message):
                     db.add(new_task)
 
                     if t_type == "one_time":
-                        reply_text_out += f"\n\n📝 Разовая: {t_desc} — {stored_time}"
+                        reply_text_out += f"\n📝 {t_desc} — {stored_time}"
                     elif t_type == "daily":
-                        reply_text_out += f"\n\n🔁 Ежедневно: {t_desc} в {t_time}"
+                        reply_text_out += f"\n🔁 {t_desc} в {t_time}"
                     elif t_type == "weekly":
-                        reply_text_out += f"\n\n📅 По {t_days}: {t_desc} в {t_time}"
+                        reply_text_out += f"\n📅 {t_desc} — {t_days} {t_time}"
                 except Exception as e:
                     print(f"Ошибка задачи: {e}", flush=True)
 
@@ -1318,7 +1341,7 @@ def reply_text(message):
                 if bonus_xp > 0:
                     lvl = add_xp(user, bonus_xp, "streak_bonus", db)
                     if lvl:
-                        reply_text_out += f"\n\n{lvl}"
+                        reply_text_out += f"\n{lvl}"
 
             db.commit()
             send_long_message(chat_id, reply_text_out, message.message_id)
@@ -1326,9 +1349,9 @@ def reply_text(message):
             break
 
         except Exception as e:
-            print(f"Ошибка (попытка {attempt + 1}): {e}", flush=True)
+            print(f"Ошибка ({attempt + 1}): {e}", flush=True)
             if attempt == 2:
-                bot.reply_to(message, "❌ Не удалось получить ответ.", reply_markup=get_main_keyboard())
+                bot.reply_to(message, "❌ Ошибка", reply_markup=get_main_keyboard())
             else:
                 time.sleep(2 * (attempt + 1))
     db.close()
@@ -1357,7 +1380,7 @@ def reply_photo(message):
             payload = {
                 "model": model,
                 "messages": [{"role": "user", "content": [
-                    {"type": "text", "text": "Что на фото? Опиши на русском."},
+                    {"type": "text", "text": "Опиши фото на русском."},
                     {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{base64_image}"}}
                 ]}],
                 "max_tokens": max_tokens,
@@ -1374,7 +1397,7 @@ def reply_photo(message):
         except Exception as e:
             print(f"Ошибка фото: {e}", flush=True)
             if attempt == 2:
-                bot.reply_to(message, "❌ Не удалось обработать фото.", reply_markup=get_main_keyboard())
+                bot.reply_to(message, "❌ Ошибка", reply_markup=get_main_keyboard())
             else:
                 time.sleep(2 * (attempt + 1))
 
@@ -1400,7 +1423,7 @@ def reply_voice(message):
         payload = {
             "model": model,
             "messages": [{"role": "user", "content": [
-                {"type": "text", "text": "Расшифруй голосовое и ответь на русском."},
+                {"type": "text", "text": "Расшифруй и ответь на русском."},
                 {"type": "input_audio", "input_audio": {"data": base64_audio, "format": "wav"}}
             ]}],
             "max_tokens": max_tokens,
@@ -1415,12 +1438,12 @@ def reply_voice(message):
         update_history(chat_id, "assistant", reply)
     except Exception as e:
         print(f"Ошибка голосового: {e}", flush=True)
-        bot.reply_to(message, "❌ Не удалось обработать голосовое.", reply_markup=get_main_keyboard())
+        bot.reply_to(message, "❌ Ошибка", reply_markup=get_main_keyboard())
 
 # === НАПОМИНАНИЯ ===
 def send_task_reminder(task, user):
     try:
-        bot.send_message(user.telegram_id, f"⏰ *Напоминание через 5 минут:*\n{task.description}", parse_mode="Markdown")
+        bot.send_message(user.telegram_id, f"⏰ Через 5 мин: {task.description}")
     except Exception as e:
         print(f"Ошибка напоминания: {e}", flush=True)
 
@@ -1552,16 +1575,16 @@ def send_morning_reports():
                     user.last_report_date = today_str
                     continue
 
-                text = f"☀️ **Доброе утро!**\n\nПлан на сегодня:\n" + "\n".join(today_tasks)
-                text += f"\n\n✨ XP: {user.xp} | 💰 Баланс: {user.balance:.0f}"
+                text = "☀️ **Сегодня:**\n" + "\n".join(today_tasks)
+                text += f"\n\nXP: {user.xp} | 💰 {user.balance:.0f}"
 
                 try:
                     bot.send_message(user.telegram_id, text, parse_mode="Markdown")
                     user.last_report_date = today_str
                 except Exception as e:
-                    print(f"Не могу отправить отчёт {user.telegram_id}: {e}", flush=True)
+                    print(f"Отчёт не ушёл {user.telegram_id}: {e}", flush=True)
             except Exception as e:
-                print(f"Ошибка отчёта для {user.id}: {e}", flush=True)
+                print(f"Ошибка отчёта {user.id}: {e}", flush=True)
 
         db.commit()
     except Exception as e:
