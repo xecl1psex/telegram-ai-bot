@@ -47,20 +47,20 @@ HEADERS = {
 hf_client = InferenceClient(token=HF_TOKEN) if HF_TOKEN else None
 
 HF_MODELS = {
-    "flux_schnell": {
-        "id": "black-forest-labs/FLUX.1-schnell",
-        "name": "⚡ FLUX.1 Schnell",
-        "desc": "Быстрая и качественная. Оптимизирована для 4 шагов генерации. Рекомендуется.",
+    "sdxl": {
+        "id": "stabilityai/stable-diffusion-xl-base-1.0",
+        "name": "🎨 SDXL Base 1.0",
+        "desc": "Мощная, стабильно бесплатная. Хорошо рисует всё.",
     },
-    "flux_dev": {
-        "id": "black-forest-labs/FLUX.1-dev",
-        "name": "🎨 FLUX.1 Dev",
-        "desc": "Мощная модель с высокой детализацией. Может быть медленнее.",
+    "sdxl_turbo": {
+        "id": "stabilityai/sdxl-turbo",
+        "name": "⚡ SDXL Turbo",
+        "desc": "Быстрая, 1-4 шага генерации. Отлично для черновиков.",
     },
-    "sd3_medium": {
-        "id": "stabilityai/stable-diffusion-3-medium-diffusers",
-        "name": "🖼 Stable Diffusion 3 Medium",
-        "desc": "Классическая модель от Stability AI. Хороший баланс качества и скорости.",
+    "sd15": {
+        "id": "runwayml/stable-diffusion-v1-5",
+        "name": "🖼 Stable Diffusion 1.5",
+        "desc": "Классика. Самая лёгкая и быстрая, но менее детальная.",
     },
 }
 
@@ -73,7 +73,7 @@ DEFAULT_HISTORY_LEN = 6
 DEFAULT_TEMPERATURE = 0.7
 DEFAULT_MAX_TOKENS = 4096
 DEFAULT_FORMAT = "square"
-DEFAULT_HF_MODEL = "flux_schnell"
+DEFAULT_HF_MODEL = "sdxl"
 
 MAX_SAVED_ANSWER_LEN = 800
 TIMEOUT = 600
@@ -198,7 +198,6 @@ def update_history(chat_id, role, content):
     trim_history(chat_id)
 
 def clear_history(chat_id):
-    # Не добавляем system-сообщение — свой промпт мы добавляем в reply_text
     chat_history[chat_id] = []
 
 # === Форматирование Markdown -> HTML для Telegram ===
@@ -662,7 +661,7 @@ def generate_image(message):
         return
 
     user, db = get_db_user(chat_id)
-    model_info = HF_MODELS[user.hf_model]
+    model_info = HF_MODELS.get(user.hf_model, HF_MODELS[DEFAULT_HF_MODEL])
     fmt = IMAGE_FORMATS[user.format]
     db.close()
 
@@ -686,7 +685,7 @@ def generate_image(message):
         elif "429" in error_str:
             bot.reply_to(message, "⏳ Слишком много запросов. Подожди минуту и попробуй снова.", reply_markup=get_main_keyboard())
         elif "402" in error_str or "Payment Required" in error_str:
-            bot.reply_to(message, "💳 Эта модель требует платный доступ. Выбери другую в меню 🎨 Модель картинок.", reply_markup=get_main_keyboard())
+            bot.reply_to(message, "💳 Лимиты на этой модели закончились. Попробуй другую в меню 🎨 Модель картинок.", reply_markup=get_main_keyboard())
         elif "width" in error_str.lower() or "height" in error_str.lower():
             bot.reply_to(message, "⚠️ Эта модель не поддерживает выбранный формат. Попробуй квадрат или другую модель.", reply_markup=get_main_keyboard())
         else:
@@ -705,25 +704,25 @@ def reply_text(message):
 
     user, db = get_db_user(chat_id)
 
+    # Простой промпт — бот отвечает как обычная нейросеть
     system_prompt = (
-        "Ты — Cyberpunk-lite ассистент в Telegram. Ты общаешься с пользователем как обычная нейросеть, "
-        "но параллельно отслеживаешь его прогресс в RPG-стиле.\n"
-        "ВСЕГДА отвечай СТРОГО одним JSON-ОБЪЕКТОМ (не массивом, без markdown-обёрток, без ```json):\n"
+        "Ты — полезный ассистент. Отвечай на вопросы пользователя кратко и по делу, "
+        "как обычная нейросеть в чате.\n\n"
+        "Дополнительно ты ведёшь учёт активности. Проанализируй сообщение и реши:\n"
+        "- Если пользователь сделал что-то полезное — поставь xp (5-100).\n"
+        "- Если упомянул трату или доход — поставь money (число, минус для трат) и category.\n"
+        "- Если просит напоминание — заполни task.\n"
+        "- Если это просто вопрос или разговор — xp=0, money=0, task=null.\n\n"
+        "Формат ответа — строго JSON (без markdown, без ```):\n"
         "{\n"
-        "  \"reply\": \"Твой текстовый ответ пользователю\",\n"
+        "  \"reply\": \"ответ пользователю\",\n"
         "  \"xp\": 0,\n"
         "  \"money\": 0,\n"
         "  \"category\": \"\",\n"
         "  \"task\": null\n"
-        "}\n"
-        "Правила:\n"
-        "1. Обычный вопрос / болтовня — просто ответь в 'reply', остальное по нулям.\n"
-        "2. Пользователь выполнил задачу — xp от 5 до 100.\n"
-        "3. Упоминает трату/доход — money (минус для трат), category — категория.\n"
-        "4. Просит напоминание — заполни task: {\"description\": \"...\", \"type\": \"one_time|daily|weekly\", \"time\": \"HH:MM\", \"days\": \"Mon,Wed\"}."
+        "}"
     )
 
-    # Формируем messages: один system + история без system-сообщений
     clean_history = [m for m in get_history(chat_id) if m["role"] != "system"]
     messages = [{"role": "system", "content": system_prompt}] + clean_history
 
@@ -744,7 +743,6 @@ def reply_text(message):
             raw_reply = data['choices'][0]['message']['content'].strip()
             print(f"🤖 RAW ответ Gemini: {raw_reply[:600]}", flush=True)
 
-            # Убираем markdown-обёртки ```json ... ```
             cleaned = re.sub(r'^```(?:json)?\s*', '', raw_reply)
             cleaned = re.sub(r'\s*```$', '', cleaned)
 
@@ -759,26 +757,22 @@ def reply_text(message):
                     except json.JSONDecodeError:
                         pass
 
-            # Если JSON не получился вообще — отдаём как обычный текст
             if parsed is None:
                 print(f"⚠️ JSON не распарсился, отправляю как plain", flush=True)
                 send_long_message(chat_id, raw_reply, message.message_id)
                 update_history(chat_id, "assistant", raw_reply)
                 break
 
-            # Если Gemini вернул массив — берём первый элемент
             if isinstance(parsed, list):
                 print(f"⚠️ Gemini вернул list, беру первый элемент", flush=True)
                 parsed = parsed[0] if parsed else {}
 
-            # Если всё ещё не словарь — fallback
             if not isinstance(parsed, dict):
                 print(f"⚠️ JSON не dict: {type(parsed)}. Отправляю raw.", flush=True)
                 send_long_message(chat_id, raw_reply, message.message_id)
                 update_history(chat_id, "assistant", raw_reply)
                 break
 
-            # Пробуем разные ключи для текста ответа
             reply_text = (
                 parsed.get("reply")
                 or parsed.get("response")
@@ -816,7 +810,7 @@ def reply_text(message):
                     user.xp -= xp_needed
                     user.level += 1
                     xp_needed = int(100 * (1.5 ** user.level))
-                    reply_text += f"\n\n🎉 **Уровень повышен!** Теперь ты Level {user.level}!"
+                    reply_text += f"\n\n🎉 Уровень повышен! Теперь ты Level {user.level}!"
                 reply_text += f"\n\n✨ +{xp_gain} XP"
 
             # 2. Баланс
@@ -961,7 +955,6 @@ def check_tasks():
     db = SessionLocal()
     try:
         tasks = db.query(Task).filter(Task.is_active == True).all()
-        # Логика напоминаний будет добавлена на следующем шаге
         for task in tasks:
             pass
     except Exception as e:
