@@ -5,6 +5,7 @@ import base64
 import time
 import threading
 import json
+import urllib.parse
 from io import BytesIO
 from PIL import Image
 import requests
@@ -17,7 +18,6 @@ from telebot.types import (
 )
 from dotenv import load_dotenv
 from pydub import AudioSegment
-from huggingface_hub import InferenceClient
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 from apscheduler.schedulers.background import BackgroundScheduler
@@ -42,12 +42,52 @@ HEADERS = {
     "Content-Type": "application/json"
 }
 
-hf_client = InferenceClient(token=HF_TOKEN) if HF_TOKEN else None
-
-HF_MODELS = {
-    "sdxl": {"id": "stabilityai/stable-diffusion-xl-base-1.0", "name": "🎨 SDXL Base 1.0", "desc": "Мощная, бесплатная."},
-    "sdxl_turbo": {"id": "stabilityai/sdxl-turbo", "name": "⚡ SDXL Turbo", "desc": "Быстрая, 1-4 шага."},
-    "sd15": {"id": "runwayml/stable-diffusion-v1-5", "name": "🖼 Stable Diffusion 1.5", "desc": "Классика, быстрая."},
+# === МОДЕЛИ ГЕНЕРАЦИИ КАРТИНОК ===
+IMAGE_MODELS = {
+    # --- Pollinations (работает всегда, без ключей) ---
+    "pollinations": {
+        "name": "🌸 Pollinations FLUX",
+        "desc": "Бесплатно, без лимитов. Хорошее качество.",
+        "provider": "pollinations",
+        "model": "flux",
+    },
+    "pollinations_turbo": {
+        "name": "⚡ Pollinations Turbo",
+        "desc": "Быстрее, но чуть хуже качество.",
+        "provider": "pollinations",
+        "model": "turbo",
+    },
+    # --- Hugging Face (заработают после обновления лимитов) ---
+    "hf_flux_schnell": {
+        "name": "✨ HF FLUX.1 Schnell",
+        "desc": "HuggingFace. Быстрая, качественная.",
+        "provider": "hf",
+        "id": "black-forest-labs/FLUX.1-schnell",
+    },
+    "hf_flux_dev": {
+        "name": "🌟 HF FLUX.1 Dev",
+        "desc": "HuggingFace. Максимальное качество.",
+        "provider": "hf",
+        "id": "black-forest-labs/FLUX.1-dev",
+    },
+    "hf_sd35_large": {
+        "name": "🖼 HF SD 3.5 Large",
+        "desc": "HuggingFace. Высокая детализация.",
+        "provider": "hf",
+        "id": "stabilityai/stable-diffusion-3.5-large",
+    },
+    "hf_sdxl": {
+        "name": "🎨 HF SDXL Base 1.0",
+        "desc": "HuggingFace. Золотая середина.",
+        "provider": "hf",
+        "id": "stabilityai/stable-diffusion-xl-base-1.0",
+    },
+    "hf_sd15": {
+        "name": "🖼 HF SD 1.5",
+        "desc": "HuggingFace. Классика, быстрая.",
+        "provider": "hf",
+        "id": "runwayml/stable-diffusion-v1-5",
+    },
 }
 
 bot = telebot.TeleBot(TOKEN)
@@ -58,7 +98,7 @@ DEFAULT_HISTORY_LEN = 6
 DEFAULT_TEMPERATURE = 0.7
 DEFAULT_MAX_TOKENS = 4096
 DEFAULT_FORMAT = "square"
-DEFAULT_HF_MODEL = "sdxl"
+DEFAULT_IMAGE_MODEL = "pollinations"
 
 MAX_SAVED_ANSWER_LEN = 800
 TIMEOUT = 600
@@ -131,8 +171,8 @@ RESET_TITLES = {
 
 scheduler = BackgroundScheduler(timezone=TIMEZONE)
 
-def hf_model_info(model_id):
-    return HF_MODELS.get(model_id) or HF_MODELS[DEFAULT_HF_MODEL]
+def image_model_info(model_id):
+    return IMAGE_MODELS.get(model_id) or IMAGE_MODELS[DEFAULT_IMAGE_MODEL]
 
 def model_info(model_id):
     return MODEL_INFO.get(model_id) or MODEL_INFO[DEFAULT_MODEL]
@@ -148,6 +188,9 @@ def get_db_user(chat_id):
         db.add(user)
         db.commit()
         db.refresh(user)
+    if user.hf_model not in IMAGE_MODELS:
+        user.hf_model = DEFAULT_IMAGE_MODEL
+        db.commit()
     return user, db
 
 def add_xp(user, amount, source, db):
@@ -503,6 +546,55 @@ def translate_to_english(text):
         print(f"⚠️ Ошибка перевода: {e}", flush=True)
     return text
 
+# === ГЕНЕРАЦИЯ — POLLINATIONS ===
+def generate_pollinations(prompt, width, height, model="flux"):
+    try:
+        encoded = urllib.parse.quote(prompt)
+        seed = int(time.time()) % 1000000
+        url = (
+            f"https://image.pollinations.ai/prompt/{encoded}"
+            f"?width={width}&height={height}&seed={seed}&nologo=true&model={model}"
+        )
+        print(f"🎨 Pollinations ({model}): {width}x{height}", flush=True)
+        r = requests.get(url, timeout=120)
+        if r.status_code == 200 and r.content and len(r.content) > 1000:
+            return r.content
+        print(f"⚠️ Pollinations статус {r.status_code}", flush=True)
+    except Exception as e:
+        print(f"❌ Pollinations: {e}", flush=True)
+    return None
+
+# === ГЕНЕРАЦИЯ — HUGGING FACE ===
+def generate_huggingface(prompt, width, height, model_id):
+    try:
+        url = f"https://router.huggingface.co/hf-inference/models/{model_id}"
+        headers = {
+            "Authorization": f"Bearer {HF_TOKEN}",
+            "Content-Type": "application/json",
+            "x-wait-for-model": "true",
+        }
+        payload = {
+            "inputs": prompt,
+            "parameters": {"width": width, "height": height},
+        }
+        print(f"🎨 HF: {model_id} {width}x{height}", flush=True)
+        r = requests.post(url, headers=headers, json=payload, timeout=180)
+        if r.status_code == 200 and r.content and len(r.content) > 1000:
+            return r.content
+        print(f"⚠️ HF {r.status_code}: {r.text[:200]}", flush=True)
+        # Пробуем распарсить ошибку
+        try:
+            err_json = r.json()
+            if isinstance(err_json, dict):
+                err_msg = str(err_json.get("error", "")).lower()
+                if any(kw in err_msg for kw in ("limit", "quota", "credit", "payment", "upgrade", "pro")):
+                    return {"error": "limit"}
+        except Exception:
+            pass
+    except Exception as e:
+        print(f"❌ HF: {e}", flush=True)
+    return None
+
 def call_gemini(messages, model, temperature, max_tokens):
     payload = {
         "model": model,
@@ -551,30 +643,27 @@ def build_system_prompt(user, db):
         "  • «сделал зарядку / пробежал 5 км / потренировался» → xp 15-30\n"
         "  • «убрал комнату / помыл посуду / постирал» → xp 10-15\n"
         "  • «почистил зубы / выпил воду» → xp 5\n"
-        "  • «закрыл проект / сдал экзамен / закончил смену на работе» → xp 30-100\n"
+        "  • «закрыл проект / сдал экзамен / закончил смену» → xp 30-100\n"
         "  • «читал 30 минут / учил английский» → xp 10-20\n\n"
-        "XP НЕ начисляй (xp: 0) в этих случаях:\n"
-        "  • Приветствия, «ку», «привет», «хай», «здарова», «доброе утро»\n"
-        "  • Обычные вопросы и ответы («как дела?», «что такое X?»)\n"
+        "XP НЕ начисляй (xp: 0):\n"
+        "  • Приветствия («ку», «привет», «хай», «здарова»)\n"
+        "  • Вопросы («как дела?», «что такое X?»)\n"
         "  • Болтовня, шутки, флирт\n"
         "  • Просьбы поставить задачу / напомнить\n"
         "  • Запись траты / дохода / баланса\n"
-        "  • Стикеры и просто «ок», «да», «нет», «спасибо»\n"
+        "  • Стикеры, «ок», «да», «нет», «спасибо»\n"
         "  • Фото / голосовое без сообщения о выполнении дела\n"
-        "  • Если пользователь говорит что СОБИРАЕТСЯ что-то сделать (будущее время)\n\n"
-        "ПРАВИЛО: если сомневаешься — xp: 0. Лучше не дать XP, чем дать зря.\n\n"
+        "  • Будущее время («сделаю», «планирую»)\n\n"
+        "ПРАВИЛО: если сомневаешься — xp: 0.\n\n"
         "=== ФИНАНСЫ ===\n"
         "1) money — ИЗМЕНИТЬ баланс (прибавить/вычесть):\n"
         "   • «потратил 500 на еду» → money: -500, category: \"Еда\"\n"
-        "   • «купил кофе 300» → money: -300, category: \"Кафе\"\n"
         "   • «зарплата 50000» → money: 50000, category: \"Зарплата\"\n\n"
         "2) set_balance — УСТАНОВИТЬ баланс в точное значение (ЗАМЕНИТЬ):\n"
         "   • «установи баланс 3327.62» → set_balance: 3327.62\n"
         "   • «мой баланс 5000» → set_balance: 5000\n"
-        "   • «на карте 3327.62» → set_balance: 3327.62\n"
-        "   • «запиши что баланс 3327.62» → set_balance: 3327.62\n"
-        "   • «не вычитай, а просто установи 3327» → set_balance: 3327\n\n"
-        "Если пользователь называет точное число, чтобы баланс СТАЛ таким → set_balance, money: 0.\n"
+        "   • «на карте 3327» → set_balance: 3327\n\n"
+        "Если пользователь называет точное число → set_balance, money: 0.\n"
         "Если ЗАРАБОТАЛ или ПОТРАТИЛ → money, set_balance: null.\n\n"
         "=== ЗАДАЧИ ===\n"
         "- one_time: description + date (YYYY-MM-DD) + time (HH:MM). "
@@ -726,20 +815,26 @@ def callback_set_format(call):
     bot.answer_callback_query(call.id, info['name'])
     bot.edit_message_text(chat_id=chat_id, message_id=call.message.message_id, text=f"✅ {info['name']}")
 
-# === HF MODELS ===
-def build_hf_models_keyboard(chat_id):
+# === МОДЕЛИ ГЕНЕРАЦИИ ===
+def build_image_models_keyboard(chat_id):
     user, db = get_db_user(chat_id)
     current = user.hf_model
     db.close()
     markup = InlineKeyboardMarkup(row_width=1)
-    for model_id, info in HF_MODELS.items():
+    for model_id, info in IMAGE_MODELS.items():
         check = " ✅" if model_id == current else ""
         markup.add(InlineKeyboardButton(text=f"{info['name']}{check}", callback_data=f"set_hf_model:{model_id}"))
     return markup
 
 @bot.message_handler(commands=['image_models'])
 def show_hf_models(message):
-    bot.send_message(message.chat.id, "🎨 Модель генерации:", reply_markup=build_hf_models_keyboard(message.chat.id))
+    bot.send_message(
+        message.chat.id,
+        "🎨 Модель генерации:\n"
+        "🌸 / ⚡ — Pollinations, бесплатно без лимитов.\n"
+        "✨ 🌟 🖼 🎨 — HuggingFace, заработают после обновления лимитов.",
+        reply_markup=build_image_models_keyboard(message.chat.id)
+    )
 
 @bot.callback_query_handler(func=lambda call: call.data.startswith('set_hf_model:'))
 def callback_set_hf_model(call):
@@ -749,9 +844,9 @@ def callback_set_hf_model(call):
     user.hf_model = model_id
     db.commit()
     db.close()
-    info = hf_model_info(model_id)
+    info = image_model_info(model_id)
     bot.answer_callback_query(call.id, info['name'])
-    bot.edit_message_text(chat_id=chat_id, message_id=call.message.message_id, text=f"✅ {info['name']}")
+    bot.edit_message_text(chat_id=chat_id, message_id=call.message.message_id, text=f"✅ {info['name']}\n{info['desc']}")
 
 # === GEMINI MODELS ===
 def build_models_keyboard(chat_id):
@@ -1300,7 +1395,7 @@ def stats_command(message):
                  f"📏 {user.history_len}\n"
                  f"🎲 {user.temperature}\n"
                  f"📝 {user.max_tokens}\n"
-                 f"🎨 {hf_model_info(user.hf_model)['name']}\n"
+                 f"🎨 {image_model_info(user.hf_model)['name']}\n"
                  f"📐 {format_info(user.format)['name']}\n\n"
                  f"История: {len(history)} сообщ., {total_chars} симв.",
                  reply_markup=get_main_keyboard(), parse_mode="Markdown")
@@ -1351,35 +1446,54 @@ def generate_image(message):
     if not prompt:
         bot.reply_to(message, "🖼 `/image кот в космосе`", parse_mode="Markdown")
         return
-    if not hf_client:
-        bot.reply_to(message, "❌ Не задан HF_TOKEN", reply_markup=get_main_keyboard())
-        return
 
     user, db = get_db_user(chat_id)
-    info = hf_model_info(user.hf_model)
+    info = image_model_info(user.hf_model)
     fmt = format_info(user.format)
     db.close()
 
     bot.send_message(chat_id, f"🎨 Генерирую ({info['name']})...")
     english_prompt = translate_to_english(prompt)
+    print(f"🎨 Промпт: {english_prompt}", flush=True)
+
+    provider = info.get("provider")
+    image_bytes = None
+    hf_limit_reached = False
+
+    if provider == "pollinations":
+        image_bytes = generate_pollinations(
+            english_prompt, fmt['width'], fmt['height'],
+            model=info.get("model", "flux")
+        )
+    elif provider == "hf":
+        result = generate_huggingface(english_prompt, fmt['width'], fmt['height'], info.get("id"))
+        if isinstance(result, dict) and result.get("error") == "limit":
+            hf_limit_reached = True
+        else:
+            image_bytes = result
+
+    if hf_limit_reached:
+        bot.reply_to(
+            message,
+            "⚠️ У Hugging Face закончились лимиты.\n"
+            "Переключись на 🌸 Pollinations через `/image_models` или подожди обновления кредитов.",
+            reply_markup=get_main_keyboard()
+        )
+        return
+
+    if image_bytes is None:
+        if provider == "pollinations":
+            bot.reply_to(message, "❌ Pollinations не ответил. Попробуй через минуту.", reply_markup=get_main_keyboard())
+        else:
+            bot.reply_to(message, "❌ HF не ответил. Попробуй через минуту или смени модель.", reply_markup=get_main_keyboard())
+        return
 
     try:
-        image = hf_client.text_to_image(english_prompt, model=info["id"], width=fmt['width'], height=fmt['height'])
-        buff = BytesIO()
-        image.save(buff, format="PNG")
-        buff.seek(0)
+        buff = BytesIO(image_bytes)
         bot.send_photo(chat_id, buff, reply_to_message_id=message.message_id)
     except Exception as e:
-        error_str = str(e)
-        print(f"Ошибка HF: {error_str}", flush=True)
-        if "503" in error_str:
-            bot.reply_to(message, "⏳ Модель загружается, попробуй через 20-30 сек.", reply_markup=get_main_keyboard())
-        elif "429" in error_str:
-            bot.reply_to(message, "⏳ Слишком много запросов, подожди минуту.", reply_markup=get_main_keyboard())
-        elif "402" in error_str or "Payment Required" in error_str:
-            bot.reply_to(message, "💳 Лимиты закончились. Смени модель.", reply_markup=get_main_keyboard())
-        else:
-            bot.reply_to(message, f"❌ Ошибка: {error_str[:200]}", reply_markup=get_main_keyboard())
+        print(f"❌ Отправка: {e}", flush=True)
+        bot.reply_to(message, "❌ Картинка сгенерирована, но не отправилась.", reply_markup=get_main_keyboard())
 
 # === ОБРАБОТКА ТЕКСТА ===
 @bot.message_handler(content_types=['text'])
