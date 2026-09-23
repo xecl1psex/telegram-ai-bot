@@ -767,14 +767,14 @@ def reply_text(message):
             # 2. Обновляем баланс
             if money_change != 0:
                 user.balance += money_change
-                db.add(Transaction(user_id=chat_id, amount=money_change, category=category, description=user_text[:50]))
+                db.add(Transaction(user_id=chat.id, amount=money_change, category=category, description=user_text[:50]))
                 sign = "+" if money_change > 0 else ""
                 reply_text += f"\n💰 Баланс: {sign}{money_change} ({category}). Текущий баланс: {user.balance:.2f}"
 
             # 3. Создаем задачу
             if task_data:
                 new_task = Task(
-                    user_id=chat_id,
+                    user_id=chat.id,
                     description=task_data['description'],
                     task_type=task_data['type'],
                     time_str=task_data.get('time'),
