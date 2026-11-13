@@ -3,9 +3,18 @@ from sqlalchemy import create_engine, Column, Integer, String, Float, Boolean, D
 from sqlalchemy.orm import declarative_base, sessionmaker
 from datetime import datetime
 
+# Получаем URL базы данных из переменных окружения Render
 DATABASE_URL = os.environ.get("DATABASE_URL")
 if not DATABASE_URL:
     raise ValueError("Не задан DATABASE_URL")
+
+# === ИСПРАВЛЕНИЕ ДЛЯ SQLALCHEMY 2.1+ ===
+# Принудительно указываем драйвер psycopg (версия 3), который мы добавили в requirements.txt.
+# Это решает ошибку "ModuleNotFoundError: No module named 'psycopg'".
+if DATABASE_URL.startswith("postgres://"):
+    DATABASE_URL = DATABASE_URL.replace("postgres://", "postgresql+psycopg://", 1)
+elif DATABASE_URL.startswith("postgresql://"):
+    DATABASE_URL = DATABASE_URL.replace("postgresql://", "postgresql+psycopg://", 1)
 
 engine = create_engine(DATABASE_URL, pool_pre_ping=True)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
@@ -25,7 +34,7 @@ class User(Base):
     max_tokens = Column(Integer, default=4096)
     hf_model = Column(String, default="sdxl")
     format = Column(String, default="square")
-    last_report_date = Column(String, nullable=True)  # дата последнего утреннего отчёта
+    last_report_date = Column(String, nullable=True)
 
 class Task(Base):
     __tablename__ = "tasks"
